@@ -70,6 +70,8 @@ export interface ChatMessage {
   route?: string;
   metadata?: ChatMetadata;
   stages?: StageEvent[];
+  /** "猜你想问" follow-up questions, from the `suggestedQuestions` SSE event. */
+  suggestedQuestions?: string[];
 }
 
 /** Payload of the `stage` SSE event (contract section 4). */

@@ -352,6 +352,7 @@ def append_message(
     sources: Optional[List[Dict[str, Any]]] = None,
     confidence: Optional[float] = None,
     route: Optional[str] = None,
+    suggested_questions: Optional[List[str]] = None,
 ) -> int:
     """Append a message and return its index within the session."""
     next_index = db.query_one(
@@ -361,8 +362,8 @@ def append_message(
     )["n"]
     db.execute(
         "INSERT INTO messages"
-        " (id, session_id, message_index, role, content, sources, confidence, route, created_at)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        " (id, session_id, message_index, role, content, sources, confidence, route, suggested_questions, created_at)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             new_id(),
             session_id,
@@ -372,6 +373,7 @@ def append_message(
             json.dumps(sources, ensure_ascii=False) if sources else None,
             confidence,
             route,
+            json.dumps(suggested_questions, ensure_ascii=False) if suggested_questions else None,
             db.now_iso(),
         ),
     )
@@ -402,6 +404,12 @@ def list_messages(session_id: str, limit: Optional[int] = None) -> List[Dict[str
                 sources = json.loads(r["sources"])
             except (ValueError, TypeError):
                 sources = None
+        suggested_questions = None
+        if r["suggested_questions"]:
+            try:
+                suggested_questions = json.loads(r["suggested_questions"])
+            except (ValueError, TypeError):
+                suggested_questions = None
         out.append({
             "message_index": r["message_index"],
             "role": r["role"],
@@ -409,6 +417,7 @@ def list_messages(session_id: str, limit: Optional[int] = None) -> List[Dict[str
             "sources": sources,
             "confidence": r["confidence"],
             "route": r["route"],
+            "suggested_questions": suggested_questions,
             "created_at": r["created_at"],
         })
     return out

@@ -71,11 +71,12 @@ public class MetadataStore {
     /**
      * {@code sources} is the citation list as stored: a JSON array of objects with
      * keys {@code text}, {@code score}, {@code source}, {@code document_id} and
-     * {@code rerank_score}. Null when the message has none.
+     * {@code rerank_score}. Null when the message has none. {@code suggestedQuestions}
+     * is the "猜你想问" follow-up list, also null when none were generated.
      */
     public record MessageRow(int messageIndex, String role, String content,
                              List<Map<String, Object>> sources, Double confidence, String route,
-                             String createdAt) {}
+                             List<String> suggestedQuestions, String createdAt) {}
 
     public record FeedbackStats(int total, int positive, int negative, double satisfactionRate) {}
 
@@ -378,15 +379,20 @@ public class MetadataStore {
 
     /** Append a message and return its index within the session. */
     public int appendMessage(String sessionId, String role, String content,
-                             List<Map<String, Object>> sources, Double confidence, String route) {
+                             List<Map<String, Object>> sources, Double confidence, String route,
+                             List<String> suggestedQuestions) {
         int nextIndex = count("SELECT COALESCE(MAX(message_index) + 1, 0) FROM messages"
                 + " WHERE session_id = ?", sessionId);
         update("INSERT INTO messages"
-                        + " (id, session_id, message_index, role, content, sources, confidence, route, created_at)"
-                        + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        + " (id, session_id, message_index, role, content, sources, confidence, route,"
+                        + "  suggested_questions, created_at)"
+                        + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 newId(), sessionId, nextIndex, role, content,
                 sources == null || sources.isEmpty() ? null : gson.toJson(sources),
-                confidence, route, Db.nowIso());
+                confidence, route,
+                suggestedQuestions == null || suggestedQuestions.isEmpty()
+                        ? null : gson.toJson(suggestedQuestions),
+                Db.nowIso());
         touchSession(sessionId);
         return nextIndex;
     }
@@ -487,7 +493,8 @@ public class MetadataStore {
         Double boxedConfidence = rs.wasNull() ? null : confidence;
         return new MessageRow(rs.getInt("message_index"), rs.getString("role"),
                 rs.getString("content"), parseSources(rs.getString("sources")),
-                boxedConfidence, rs.getString("route"), rs.getString("created_at"));
+                boxedConfidence, rs.getString("route"),
+                parseStringList(rs.getString("suggested_questions")), rs.getString("created_at"));
     }
 
     private Map<String, Object> parseMetadata(String json) {
@@ -510,6 +517,17 @@ public class MetadataStore {
         try {
             return gson.fromJson(json,
                     new TypeToken<List<Map<String, Object>>>() {}.getType());
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private List<String> parseStringList(String json) {
+        if (json == null || json.isEmpty()) {
+            return null;
+        }
+        try {
+            return gson.fromJson(json, new TypeToken<List<String>>() {}.getType());
         } catch (Exception e) {
             return null;
         }

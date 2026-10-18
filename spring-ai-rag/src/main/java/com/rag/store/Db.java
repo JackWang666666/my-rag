@@ -87,15 +87,16 @@ public class Db {
             CREATE INDEX IF NOT EXISTS idx_sessions_owner ON sessions(owner);
 
             CREATE TABLE IF NOT EXISTS messages (
-                id            TEXT PRIMARY KEY,
-                session_id    TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-                message_index INTEGER NOT NULL,
-                role          TEXT NOT NULL,
-                content       TEXT NOT NULL,
-                sources       TEXT,
-                confidence    REAL,
-                route         TEXT,
-                created_at    TEXT NOT NULL
+                id                   TEXT PRIMARY KEY,
+                session_id           TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                message_index        INTEGER NOT NULL,
+                role                 TEXT NOT NULL,
+                content              TEXT NOT NULL,
+                sources              TEXT,
+                confidence           REAL,
+                route                TEXT,
+                suggested_questions  TEXT,
+                created_at           TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
 
@@ -173,6 +174,19 @@ public class Db {
         }
         if (!hasStage) {
             st.executeUpdate("ALTER TABLE documents ADD COLUMN stage TEXT");
+        }
+
+        boolean hasSuggestedQuestions = false;
+        try (ResultSet rs = st.executeQuery("PRAGMA table_info(messages)")) {
+            while (rs.next()) {
+                if ("suggested_questions".equals(rs.getString("name"))) {
+                    hasSuggestedQuestions = true;
+                    break;
+                }
+            }
+        }
+        if (!hasSuggestedQuestions) {
+            st.executeUpdate("ALTER TABLE messages ADD COLUMN suggested_questions TEXT");
         }
     }
 

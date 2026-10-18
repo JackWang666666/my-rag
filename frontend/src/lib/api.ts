@@ -393,6 +393,7 @@ export interface ChatStreamHandlers {
   onStage?: (stage: StageEvent) => void;
   onChunk: (text: string) => void;
   onSources?: (sources: ChatMessage["sources"]) => void;
+  onSuggestedQuestions?: (questions: string[]) => void;
   onDone: (sources?: ChatMessage["sources"]) => void;
   onError: (error: string) => void;
 }
@@ -457,6 +458,14 @@ export function chatStream(
           }
         } catch {
           /* ignore */
+        }
+        break;
+      case "suggestedQuestions":
+        try {
+          const parsed = JSON.parse(data);
+          if (Array.isArray(parsed)) handlers.onSuggestedQuestions?.(parsed);
+        } catch {
+          /* a malformed suggestedQuestions frame is not worth failing the answer over */
         }
         break;
       case "done":

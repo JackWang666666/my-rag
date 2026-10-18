@@ -80,15 +80,16 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS idx_sessions_owner ON sessions(owner);
 
 CREATE TABLE IF NOT EXISTS messages (
-    id            TEXT PRIMARY KEY,
-    session_id    TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    message_index INTEGER NOT NULL,                 -- 会话内序号，从 0 开始
-    role          TEXT NOT NULL,                    -- user | assistant
-    content       TEXT NOT NULL,
-    sources       TEXT,                             -- JSON 数组
-    confidence    REAL,
-    route         TEXT,
-    created_at    TEXT NOT NULL
+    id                   TEXT PRIMARY KEY,
+    session_id           TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    message_index        INTEGER NOT NULL,          -- 会话内序号，从 0 开始
+    role                 TEXT NOT NULL,              -- user | assistant
+    content              TEXT NOT NULL,
+    sources              TEXT,                       -- JSON 数组
+    confidence           REAL,
+    route                TEXT,
+    suggested_questions  TEXT,                       -- JSON 字符串数组，仅 assistant 消息可能有
+    created_at           TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
 
@@ -144,6 +145,7 @@ CREATE TABLE IF NOT EXISTS feedback (
 | `confidence` | 纯数字，如 `0.72` | 检索+重排后，正文之前 |
 | `chunk` | 正文片段（纯文本） | 流式多次 |
 | `sources` | JSON 数组 | 正文结束后 |
+| `suggestedQuestions` | JSON 字符串数组，如 `["问题1","问题2"]` | 正文（及 sources）结束后，done 之前；生成失败或为空时跳过该事件 |
 | `done` | 空字符串 | 最后 |
 | `error` | 错误信息（纯文本） | 出错时，替代 done |
 
@@ -158,6 +160,11 @@ CREATE TABLE IF NOT EXISTS feedback (
 `chunk` 的正文可能含换行。按 SSE 规范，两端都把换行拆成多个 `data:` 行
 （Python 的 sse-starlette、Java 的 `SseEmitter` 都是这个行为），前端**必须**把同一事件的
 多个 `data:` 行用 `\n` 拼回去，否则 Markdown 排版会丢失。
+
+`suggestedQuestions` 由"问题 + 完整回答"追加一次独立的小 LLM 调用生成（与路由分析、
+正文生成都是不同的调用），2-4 条，纯粹是产品层的"猜你想问"推荐，不代表模型真实
+推理过程。随消息持久化到 `messages.suggested_questions`，`GET /api/chat/history/{sessionId}`
+返回的每条消息里也带 `suggestedQuestions` 字段（无则为空数组或省略）。
 
 ## 5. REST 契约
 

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { MessageFeedback } from "@/components/message-feedback";
 import { ConfidenceIndicator } from "@/components/confidence-indicator";
+import { SuggestedQuestions } from "@/components/suggested-questions";
 import type { ChatMessage as ChatMessageType, StageEvent } from "@/types";
 
 const STAGE_LABELS: Record<StageEvent["stage"], string> = {
@@ -87,9 +88,16 @@ interface ChatMessageProps {
   isStreaming?: boolean;
   sessionId?: string;
   messageIndex?: number;
+  onSuggestedQuestionClick?: (question: string) => void;
 }
 
-export function ChatMessage({ message, isStreaming, sessionId, messageIndex }: ChatMessageProps) {
+export function ChatMessage({
+  message,
+  isStreaming,
+  sessionId,
+  messageIndex,
+  onSuggestedQuestionClick,
+}: ChatMessageProps) {
   const isUser = message.role === "user";
   const [showSources, setShowSources] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -248,6 +256,17 @@ export function ChatMessage({ message, isStreaming, sessionId, messageIndex }: C
           {!isStreaming && message.content && sessionId && messageIndex != null && (
             <MessageFeedback sessionId={sessionId} messageIndex={messageIndex} />
           )}
+
+          {/* Suggested follow-up questions */}
+          {!isStreaming &&
+            message.content &&
+            message.suggestedQuestions &&
+            message.suggestedQuestions.length > 0 && (
+              <SuggestedQuestions
+                questions={message.suggestedQuestions}
+                onSelect={(question) => onSuggestedQuestionClick?.(question)}
+              />
+            )}
         </div>
       </div>
     </div>

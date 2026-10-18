@@ -75,15 +75,16 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS idx_sessions_owner ON sessions(owner);
 
 CREATE TABLE IF NOT EXISTS messages (
-    id            TEXT PRIMARY KEY,
-    session_id    TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    message_index INTEGER NOT NULL,
-    role          TEXT NOT NULL,
-    content       TEXT NOT NULL,
-    sources       TEXT,
-    confidence    REAL,
-    route         TEXT,
-    created_at    TEXT NOT NULL
+    id                   TEXT PRIMARY KEY,
+    session_id           TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    message_index        INTEGER NOT NULL,
+    role                 TEXT NOT NULL,
+    content              TEXT NOT NULL,
+    sources              TEXT,
+    confidence           REAL,
+    route                TEXT,
+    suggested_questions  TEXT,
+    created_at           TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
 
@@ -133,6 +134,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(documents)")}
     if "stage" not in columns:
         conn.execute("ALTER TABLE documents ADD COLUMN stage TEXT")
+
+    message_columns = {row["name"] for row in conn.execute("PRAGMA table_info(messages)")}
+    if "suggested_questions" not in message_columns:
+        conn.execute("ALTER TABLE messages ADD COLUMN suggested_questions TEXT")
 
 
 def get_conn() -> sqlite3.Connection:

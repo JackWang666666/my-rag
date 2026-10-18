@@ -350,10 +350,17 @@ public class ChatService {
                 sink.send("sources", sources);
             }
 
+            List<String> suggestedQuestions =
+                    queryAnalyzer.generateSuggestedQuestions(ctx.question(), answer.toString());
+            if (!suggestedQuestions.isEmpty()) {
+                sink.send("suggestedQuestions", suggestedQuestions);
+            }
+
             // --- Step 9: persist the exchange ---
-            store.appendMessage(sessionId, "user", ctx.question(), null, null, null);
+            store.appendMessage(sessionId, "user", ctx.question(), null, null, null, null);
             store.appendMessage(sessionId, "assistant", answer.toString(),
-                    sources.isEmpty() ? null : sources, confidence, analysis.route());
+                    sources.isEmpty() ? null : sources, confidence, analysis.route(),
+                    suggestedQuestions.isEmpty() ? null : suggestedQuestions);
 
             sink.send("done", "");
 
@@ -385,8 +392,15 @@ public class ChatService {
         }
         sink.send("stage", stagePayload("generating", "done", elapsedMs(generateStart)));
 
-        store.appendMessage(sessionId, "user", ctx.question(), null, null, null);
-        store.appendMessage(sessionId, "assistant", answer.toString(), null, confidence, "direct");
+        List<String> suggestedQuestions =
+                queryAnalyzer.generateSuggestedQuestions(ctx.question(), answer.toString());
+        if (!suggestedQuestions.isEmpty()) {
+            sink.send("suggestedQuestions", suggestedQuestions);
+        }
+
+        store.appendMessage(sessionId, "user", ctx.question(), null, null, null, null);
+        store.appendMessage(sessionId, "assistant", answer.toString(), null, confidence, "direct",
+                suggestedQuestions.isEmpty() ? null : suggestedQuestions);
 
         sink.send("done", "");
     }
@@ -619,6 +633,7 @@ public class ChatService {
                     .role(row.role())
                     .content(row.content())
                     .sources(row.sources())
+                    .suggestedQuestions(row.suggestedQuestions())
                     .timestamp(row.createdAt())
                     .build());
         }

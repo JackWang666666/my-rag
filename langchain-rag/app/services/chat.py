@@ -15,7 +15,7 @@ from app.models.schemas import MessageItem, SessionResponse
 from app.services.embedding import get_embeddings
 from app.services.graph import get_graph_context
 from app.services.llm import get_chat_model
-from app.services.query_analyzer import analyze_query
+from app.services.query_analyzer import analyze_query, generate_suggested_questions
 from app.services.reranker import clamp01, rerank
 from app.services.retrieval import search
 
@@ -247,9 +247,18 @@ async def chat_stream(
                 },
             }
 
+            suggested_questions = await generate_suggested_questions(question, full_response)
+            if suggested_questions:
+                yield {"event": "suggestedQuestions", "data": suggested_questions}
+
             store.append_message(session_id, "user", question)
             store.append_message(
-                session_id, "assistant", full_response, confidence=0.9, route=route
+                session_id,
+                "assistant",
+                full_response,
+                confidence=0.9,
+                route=route,
+                suggested_questions=suggested_questions or None,
             )
 
             yield {"event": "done", "data": ""}
@@ -402,6 +411,10 @@ async def chat_stream(
         if sources:
             yield {"event": "sources", "data": sources}
 
+        suggested_questions = await generate_suggested_questions(question, full_response)
+        if suggested_questions:
+            yield {"event": "suggestedQuestions", "data": suggested_questions}
+
         # --- Step 9: Persist the exchange ---
         store.append_message(session_id, "user", question)
         store.append_message(
@@ -411,6 +424,7 @@ async def chat_stream(
             sources=sources or None,
             confidence=confidence_score,
             route=route,
+            suggested_questions=suggested_questions or None,
         )
 
         yield {"event": "done", "data": ""}
@@ -425,6 +439,7 @@ def _to_message_item(msg: Dict[str, Any]) -> MessageItem:
         role=msg["role"],
         content=msg["content"],
         sources=msg["sources"],
+        suggested_questions=msg.get("suggested_questions"),
         timestamp=db.parse_iso(msg["created_at"]),
     )
 

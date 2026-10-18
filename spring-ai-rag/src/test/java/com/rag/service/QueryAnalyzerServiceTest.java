@@ -668,7 +668,7 @@ class QueryAnalyzerServiceTest {
         }
 
         private MetadataStore.MessageRow message(String role, String content) {
-            return new MetadataStore.MessageRow(0, role, content, null, null, null,
+            return new MetadataStore.MessageRow(0, role, content, null, null, null, null,
                     "2026-01-02T03:04:05Z");
         }
     }

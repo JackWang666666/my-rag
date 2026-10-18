@@ -66,6 +66,18 @@ HYDE_PROMPT = """请根据以下问题，写一段假设性的答案文本（约
 
 假设性答案："""
 
+SUGGESTED_QUESTIONS_PROMPT = """根据下面的问答，生成2-4个用户接下来可能想问的后续问题。
+要求：
+- 与原问题和回答内容相关，但不是简单重复
+- 每个问题简短（不超过30字），自然口语化
+- 只返回JSON字符串数组，不要其他任何内容
+
+问题：{question}
+
+回答：{answer}
+
+JSON数组："""
+
 
 def _fallback(question: str, reason: str) -> Dict[str, Any]:
     """Safe default: plain RAG with the question unchanged."""
@@ -225,3 +237,17 @@ async def generate_hyde_document(question: str) -> str:
     except Exception as e:
         logger.warning("HyDE generation failed: %s", e)
         return question
+
+
+async def generate_suggested_questions(question: str, answer: str) -> List[str]:
+    """Generate 2-4 follow-up questions from the finished Q&A (see docs/CONTRACT.md section 4)."""
+    try:
+        llm = get_chat_model(streaming=False)
+        response = await llm.ainvoke(
+            [HumanMessage(content=SUGGESTED_QUESTIONS_PROMPT.format(question=question, answer=answer))]
+        )
+        raw = json.loads(_strip_code_fence(response.content))
+        return _as_str_list(raw, 4)
+    except Exception as e:
+        logger.warning("Suggested questions generation failed: %s", e)
+        return []

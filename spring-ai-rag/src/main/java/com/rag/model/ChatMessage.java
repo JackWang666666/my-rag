@@ -24,6 +24,8 @@ public class ChatMessage {
     private String role;
     private String content;
     private List<Map<String, Object>> sources;
+    /** "猜你想问" follow-up questions; null when none were generated. */
+    private List<String> suggestedQuestions;
     /** Stored ISO-8601 UTC string, passed through as-is. */
     private String timestamp;
 }

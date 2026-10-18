@@ -264,4 +264,36 @@ public class QueryAnalyzerService {
             return question;
         }
     }
+
+    private static final String SUGGESTED_QUESTIONS_PROMPT = """
+            根据下面的问答，生成2-4个用户接下来可能想问的后续问题。
+            要求：
+            - 与原问题和回答内容相关，但不是简单重复
+            - 每个问题简短（不超过30字），自然口语化
+            - 只返回JSON字符串数组，不要其他任何内容
+
+            问题：%s
+
+            回答：%s
+
+            JSON数组：""";
+
+    /**
+     * "猜你想问": 2-4 follow-up questions generated from the finished Q&amp;A, in a
+     * separate blocking LLM call after the main answer is done streaming. See
+     * {@code docs/CONTRACT.md} section 4. Fails open with an empty list, same as
+     * {@link #analyze} and {@link GroundingService#isGrounded}.
+     */
+    public List<String> generateSuggestedQuestions(String question, String answer) {
+        try {
+            String prompt = String.format(SUGGESTED_QUESTIONS_PROMPT, question, answer);
+            String response = llmService.call(prompt);
+            Object raw = gson.fromJson(GraphService.stripCodeFence(response),
+                    new TypeToken<List<Object>>() {}.getType());
+            return asStringList(raw, 4);
+        } catch (Exception e) {
+            log.warn("Suggested questions generation failed: {}", e.getMessage());
+            return List.of();
+        }
+    }
 }

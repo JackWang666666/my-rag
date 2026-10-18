@@ -170,8 +170,8 @@ export default function ChatPage() {
     }
   };
 
-  const handleSend = useCallback(() => {
-    const question = input.trim();
+  const handleSend = useCallback((questionOverride?: string) => {
+    const question = (questionOverride ?? input).trim();
     if (!question || !selectedKb || isStreaming) return;
 
     const now = Date.now();
@@ -260,6 +260,8 @@ export default function ChatPage() {
           );
         },
         onSources: (sources) => patchAssistant({ sources }),
+        onSuggestedQuestions: (suggestedQuestions) =>
+          patchAssistant({ suggestedQuestions }),
         onDone: (sources) => {
           if (sources) patchAssistant({ sources });
           setIsStreaming(false);
@@ -566,10 +568,7 @@ export default function ChatPage() {
                     ].map((suggestion) => (
                       <button
                         key={suggestion}
-                        onClick={() => {
-                          setInput(suggestion);
-                          textareaRef.current?.focus();
-                        }}
+                        onClick={() => handleSend(suggestion)}
                         className="text-left px-4 py-3 rounded-lg border border-border hover:bg-muted/50 hover:border-primary/30 transition-colors text-sm text-muted-foreground hover:text-foreground"
                       >
                         {suggestion}
@@ -592,6 +591,7 @@ export default function ChatPage() {
                   }
                   sessionId={sessionId}
                   messageIndex={index}
+                  onSuggestedQuestionClick={handleSend}
                 />
               ))}
               <div ref={messagesEndRef} className="h-4" />
@@ -640,7 +640,7 @@ export default function ChatPage() {
               />
               <Button
                 size="icon"
-                onClick={isStreaming ? handleStop : handleSend}
+                onClick={isStreaming ? handleStop : () => handleSend()}
                 disabled={isStreaming ? false : !input.trim() || !selectedKb}
                 aria-label={isStreaming ? "Stop generating" : "Send message"}
                 className={cn(
