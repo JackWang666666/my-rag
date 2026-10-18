@@ -1,6 +1,12 @@
 // Shapes here mirror docs/CONTRACT.md section 5. Both backends serialise
 // camelCase, so these interfaces are valid against either one.
 
+/**
+ * `knowledgeBaseId` value meaning "search every private KB I own" (contract
+ * section 5). Real KB ids are 32-char uuid4 hex, so this never collides.
+ */
+export const ALL_KB_SENTINEL = "__all__";
+
 export interface User {
   username: string;
   role: "admin" | "user";

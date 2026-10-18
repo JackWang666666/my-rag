@@ -18,6 +18,7 @@ import {
   AlertCircle,
   X,
   Square,
+  Layers,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ChatMessage } from "@/components/chat-message";
@@ -33,6 +34,7 @@ import type {
   ChatMessage as ChatMessageType,
   Session,
 } from "@/types";
+import { ALL_KB_SENTINEL } from "@/types";
 import { cn } from "@/lib/utils";
 
 function getKbTypeIcon(kbType?: string) {
@@ -335,6 +337,24 @@ export default function ChatPage() {
               Knowledge Base
             </label>
             <div className="space-y-1">
+              {/* All-my-KBs mode */}
+              {knowledgeBases.filter((kb) => !kb.isGlobal).length > 0 && (
+                <button
+                  onClick={() => {
+                    setSelectedKb(ALL_KB_SENTINEL);
+                    handleNewChat();
+                  }}
+                  className={cn(
+                    "w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors text-left",
+                    selectedKb === ALL_KB_SENTINEL
+                      ? "bg-primary/10 text-primary font-medium"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                  )}
+                >
+                  <Layers className="h-3.5 w-3.5" />
+                  <span className="truncate">全部我的知识库</span>
+                </button>
+              )}
               {/* Global KBs */}
               {knowledgeBases.filter((kb) => kb.isGlobal).length > 0 && (
                 <>
@@ -486,13 +506,22 @@ export default function ChatPage() {
             )}
           </Button>
 
-          {selectedKbData && (
+          {selectedKb === ALL_KB_SENTINEL ? (
             <div className="flex items-center gap-2">
               <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-muted/50 text-sm">
-                {getKbTypeIcon(selectedKbData.kbType)}
-                <span className="font-medium">{selectedKbData.name}</span>
+                <Layers className="h-3.5 w-3.5" />
+                <span className="font-medium">全部我的知识库</span>
               </div>
             </div>
+          ) : (
+            selectedKbData && (
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-muted/50 text-sm">
+                  {getKbTypeIcon(selectedKbData.kbType)}
+                  <span className="font-medium">{selectedKbData.name}</span>
+                </div>
+              </div>
+            )
           )}
 
           {!selectedKb && knowledgeBases.length > 0 && (

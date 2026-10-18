@@ -178,6 +178,19 @@ CREATE TABLE IF NOT EXISTS feedback (
 | GET | `/api/documents/{id}` | | `Document`（供前端轮询状态） |
 | DELETE | `/api/documents/{id}` | | `{message}` |
 | POST | `/api/chat` | `{question,knowledgeBaseId,sessionId?}` | SSE |
+
+`knowledgeBaseId` 除了真实知识库 id，还可以是字面值 `"__all__"`
+（两端常量：Python `ALL_KB_SENTINEL`、Java `ChatService.ALL_KB_SENTINEL`），
+含义是"调用者自己名下的全部私有知识库"（不含全局库；全局库仍按第4节的现有规则
+自动合并，不受这个模式影响）。该模式下两端行为一致地做了两点简化：
+- 跳过改写查询的多路召回（只用消解后的问题做一次 embedding，对每个目标库各搜一次），
+  避免"目标库数 × 改写数"的检索量爆炸
+- 跳过图谱上下文增强（Neo4j 节点按单个 `kb_id` 打标，没有单一的图可查）
+
+路由分析器收到的知识库名称是目标库名称用"、"拼接的字符串，类型固定传
+`document`。会话一旦用这个 sentinel 创建，`sessions.kb_id` 就存这个字面值
+（该表没有外键约束，可以安全存放非真实 id），续接会话时按字符串相等比较，
+无需额外处理。
 | GET | `/api/chat/history/{sessionId}` | | `{sessionId,messages}` |
 | GET | `/api/sessions` | `?knowledgeBaseId=` | `{sessions}` |
 | POST | `/api/sessions` | `{knowledgeBaseId,title?}` | `Session` |
