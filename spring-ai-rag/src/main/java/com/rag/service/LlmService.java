@@ -28,14 +28,18 @@ import java.util.List;
  * a {@code Map<String, ChatModel>} gets bean names, not provider names — see that
  * class for why the runtime switch used to be a silent no-op.
  *
- * <p>{@link #mcpTools} is attached to every blocking {@link #call}/{@link
- * #callLogged} prompt via {@code ToolCallingChatOptions}. {@code ChatModel.call}
- * runs the tool-call loop internally (default {@code internalToolExecutionEnabled
- * = true}), so no explicit loop is needed here — see docs/CONTRACT.md section 10.
- * An empty array (no MCP servers configured) is a no-op, identical to the
- * pre-MCP behavior. {@link #stream} does not get tools yet: only the {@code
- * direct} route uses it, and streamed internal tool-call execution has not been
- * verified.
+ * <p>{@link #mcpTools} is attached to every {@link #call}/{@link #callLogged}/
+ * {@link #stream} prompt via {@code ToolCallingChatOptions}. Both {@code
+ * ChatModel.call} and {@code ChatModel.stream} run the tool-call loop
+ * internally (default {@code internalToolExecutionEnabled = true}), so no
+ * explicit loop is needed here — see docs/CONTRACT.md section 10. Verified by
+ * reading the 1.0.0 sources of {@code OpenAiChatModel}/{@code OllamaChatModel}:
+ * both their {@code stream()} implementations check {@code
+ * toolExecutionEligibilityPredicate.isToolExecutionRequired}, call {@code
+ * toolCallingManager.executeToolCalls}, and recurse into {@code internalStream}
+ * with the tool results appended — the same loop {@code call()} runs, just
+ * inside the reactive pipeline. An empty {@code mcpTools} array (no MCP servers
+ * configured) is a no-op, identical to the pre-MCP behavior.
  */
 @Service
 @Slf4j
@@ -61,12 +65,12 @@ public class LlmService {
 
     /** Stream a single-prompt completion as text deltas. */
     public Flux<String> stream(String prompt) {
-        return stream(new Prompt(prompt));
+        return stream(new Prompt(prompt, toolOptions()));
     }
 
     /** Stream a multi-message completion (system + history + question). */
     public Flux<String> stream(List<Message> messages) {
-        return stream(new Prompt(messages));
+        return stream(new Prompt(messages, toolOptions()));
     }
 
     private Flux<String> stream(Prompt prompt) {

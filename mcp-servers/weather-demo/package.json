@@ -1,0 +1,11 @@
+{
+  "name": "weather-demo-mcp-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Minimal MCP server that always answers 'sunny' — a demo of a hand-written tool, not a real weather lookup.",
+  "main": "index.js",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1"
+  }
+}

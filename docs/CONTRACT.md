@@ -352,7 +352,8 @@ confidence        = 0.3*countFactor + 0.5*scoreFactor + 0.2*routeConfidence
   中间不暴露工具调用细节给前端
 
 **Java 端现状**：已实现（`com.rag.config.McpToolsConfig`），工具通过
-`ToolCallingChatOptions` 接入 `LlmService` 的非流式调用路径
-（`call`/`callLogged`）。流式路径（`stream`，仅 `direct` 路由使用）暂未接入工具。
+`ToolCallingChatOptions` 接入 `LlmService` 的全部调用路径——非流式
+（`call`/`callLogged`，用于 `rag`/`graph`/`hybrid` 路由）和流式
+（`stream`，用于 `direct` 路由）都会带上工具，闲聊式提问也能触发工具调用。
 
 **Python 端现状**：尚未实现。

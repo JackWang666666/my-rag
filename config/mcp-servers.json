@@ -1,0 +1,12 @@
+{
+  "servers": [
+    {
+      "name": "weather-demo",
+      "enabled": true,
+      "transport": "stdio",
+      "command": "node",
+      "args": ["../mcp-servers/weather-demo/index.js"],
+      "env": {}
+    }
+  ]
+}
