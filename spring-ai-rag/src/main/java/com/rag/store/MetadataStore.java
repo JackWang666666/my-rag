@@ -145,6 +145,19 @@ public class MetadataStore {
         return kbs;
     }
 
+    /**
+     * The caller's own private (non-global) knowledge bases, newest first.
+     *
+     * <p>Deliberately not {@link #listVisibleKbs}: that returns every KB for an
+     * admin, but "all my knowledge bases" means the caller's own private ones
+     * only — global-KB merging is a separate, orthogonal step in the chat
+     * pipeline.
+     */
+    public List<KbRow> listOwnedKbs(String username) {
+        return queryList("SELECT * FROM knowledge_bases WHERE owner = ? AND is_global = 0"
+                + " ORDER BY created_at DESC", MetadataStore::mapKb, username);
+    }
+
     public List<String> listGlobalKbIds(String exclude) {
         List<String> ids = new ArrayList<>();
         for (KbRow kb : listGlobalKbs(exclude)) {

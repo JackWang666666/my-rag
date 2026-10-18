@@ -93,6 +93,20 @@ def list_visible_kbs(username: str, role: str) -> List[Dict[str, Any]]:
     ))
 
 
+def list_owned_kbs(username: str) -> List[Dict[str, Any]]:
+    """The caller's own private (non-global) knowledge bases, newest first.
+
+    Deliberately not `list_visible_kbs`: that returns every KB for an admin,
+    but "all my knowledge bases" means the caller's own private ones only --
+    global-KB merging is a separate, orthogonal step in the chat pipeline.
+    """
+    return _rows(db.query(
+        "SELECT * FROM knowledge_bases WHERE owner = ? AND is_global = 0"
+        " ORDER BY created_at DESC",
+        (username,),
+    ))
+
+
 def list_global_kb_ids(exclude: Optional[str] = None) -> List[str]:
     rows = db.query(
         "SELECT id FROM knowledge_bases WHERE is_global = 1 ORDER BY created_at DESC"

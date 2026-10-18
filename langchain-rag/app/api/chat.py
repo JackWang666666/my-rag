@@ -17,6 +17,7 @@ from app.models.schemas import (
     SessionResponse,
 )
 from app.services.chat import (
+    ALL_KB_SENTINEL,
     chat_stream,
     create_session,
     delete_session,
@@ -43,7 +44,12 @@ async def chat(request: ChatRequest, current_user: dict = Depends(get_current_us
     Sends events: session, metadata, confidence, chunk, sources, done, error.
     See docs/CONTRACT.md section 4.
     """
-    kb = require_kb_read(request.knowledge_base_id, current_user)
+    # The sentinel is not a real KB, so there is no ownership to check -- the
+    # pipeline resolves it to the caller's own KBs internally.
+    if request.knowledge_base_id == ALL_KB_SENTINEL:
+        kb = {"kb_type": "document", "name": ""}
+    else:
+        kb = require_kb_read(request.knowledge_base_id, current_user)
 
     # Continuing an existing session requires owning it.
     if request.session_id:

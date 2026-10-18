@@ -28,6 +28,16 @@ HISTORY_WINDOW = 6
 # ChatService.SOURCE_SNIPPET_CHARS so both backends render identical sources.
 SOURCE_SNIPPET_CHARS = 200
 
+# `knowledgeBaseId` value meaning "search every private KB I own", instead of a
+# real KB id. Safe to overload: real ids are 32-char uuid4 hex and never look
+# like this. See docs/CONTRACT.md section 5.
+ALL_KB_SENTINEL = "__all__"
+
+# Caps on "all my knowledge bases" mode, so one user with dozens of KBs doesn't
+# turn a single question into dozens of searches.
+MAX_ALL_MODE_KBS = 5
+TOP_K_ALL_MODE_PER_KB = 5
+
 # --- System prompts by KB type ---
 
 RAG_SYSTEM_PROMPT_DOCUMENT = """You are a helpful assistant. Answer questions based on the provided context documents.
@@ -168,6 +178,17 @@ async def chat_stream(
 
     yield {"event": "session", "data": session_id}
 
+    # "All my knowledge bases" mode: resolve the sentinel to the caller's own
+    # private KBs now, so everything downstream (routing prompt, retrieval)
+    # just sees a list of one or more real kb ids.
+    if kb_id == ALL_KB_SENTINEL:
+        owned = store.list_owned_kbs(username)[:MAX_ALL_MODE_KBS]
+        target_kbs = [kb["id"] for kb in owned]
+        kb_type = "document"
+        kb_name = "、".join(kb["name"] for kb in owned) or "（暂无私有知识库）"
+    else:
+        target_kbs = [kb_id]
+
     try:
         history = _history_dicts(session_id)
 
@@ -242,16 +263,29 @@ async def chat_stream(
 
         all_results: List[Tuple[str, float, Dict[str, Any]]] = []
         query_embedding = await embeddings.aembed_query(resolved_query)
-        all_results.extend(search(kb_id, query_embedding, top_k=10))
 
-        for rewritten in analysis["rewritten_queries"][:2]:
-            if rewritten in (question, resolved_query):
-                continue
-            try:
-                rw_embedding = await embeddings.aembed_query(rewritten)
-                all_results.extend(search(kb_id, rw_embedding, top_k=5))
-            except Exception as e:
-                logger.warning("Rewritten-query retrieval failed: %s", e)
+        if len(target_kbs) == 1:
+            all_results.extend(search(target_kbs[0], query_embedding, top_k=10))
+
+            for rewritten in analysis["rewritten_queries"][:2]:
+                if rewritten in (question, resolved_query):
+                    continue
+                try:
+                    rw_embedding = await embeddings.aembed_query(rewritten)
+                    all_results.extend(search(target_kbs[0], rw_embedding, top_k=5))
+                except Exception as e:
+                    logger.warning("Rewritten-query retrieval failed: %s", e)
+        else:
+            # "All my knowledge bases" mode: one search per KB with the resolved
+            # query only. Rewritten-query multi-recall is skipped here on purpose
+            # -- doing it per KB would multiply the search count by the KB count.
+            for target_kb in target_kbs:
+                try:
+                    all_results.extend(
+                        search(target_kb, query_embedding, top_k=TOP_K_ALL_MODE_PER_KB)
+                    )
+                except Exception as e:
+                    logger.warning("All-KB-mode retrieval failed for %s: %s", target_kb, e)
 
         # --- Global KB merge: also search global knowledge bases ---
         for gkb_id in store.list_global_kb_ids(exclude=kb_id)[:3]:
@@ -301,9 +335,11 @@ async def chat_stream(
         )
 
         # --- Step 5: Graph context augmentation ---
+        # Skipped in "all my knowledge bases" mode: Neo4j nodes are tagged by a
+        # single kb_id, so there is no single graph to query here.
         graph_context = ""
         graph_terms = analysis["graph_entities"] or analysis["keywords"]
-        if route in ("graph", "hybrid") and graph_terms:
+        if len(target_kbs) == 1 and route in ("graph", "hybrid") and graph_terms:
             t0 = time.monotonic()
             yield {"event": "stage", "data": {"stage": "graph", "status": "start"}}
             try:

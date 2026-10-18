@@ -57,6 +57,17 @@ public class ChatService {
     /** Characters of each citation returned to the frontend. */
     private static final int SOURCE_SNIPPET_CHARS = 200;
 
+    /**
+     * {@code knowledgeBaseId} value meaning "search every private KB I own",
+     * instead of a real KB id. Safe to overload: real ids are 32-char uuid4 hex
+     * and never look like this. See docs/CONTRACT.md section 5.
+     */
+    public static final String ALL_KB_SENTINEL = "__all__";
+
+    /** Caps on "all my knowledge bases" mode. */
+    private static final int MAX_ALL_MODE_KBS = 5;
+    private static final int TOP_K_ALL_MODE_PER_KB = 5;
+
 
     private static final String RAG_SYSTEM_PROMPT_DOCUMENT = """
             You are a helpful assistant. Answer questions based on the provided context documents.
@@ -188,17 +199,44 @@ public class ChatService {
         try {
             List<MetadataStore.MessageRow> history = store.listMessages(sessionId, HISTORY_WINDOW);
 
+            // "All my knowledge bases" mode: resolve the sentinel to the caller's
+            // own private KBs now, so everything downstream (routing prompt,
+            // retrieval) just sees a list of one or more real kb ids.
+            List<String> targetKbs;
+            String effectiveKbType = ctx.kbType();
+            String effectiveKbName = ctx.kbName();
+            if (ALL_KB_SENTINEL.equals(ctx.kbId())) {
+                List<MetadataStore.KbRow> owned = store.listOwnedKbs(ctx.username());
+                if (owned.size() > MAX_ALL_MODE_KBS) {
+                    owned = owned.subList(0, MAX_ALL_MODE_KBS);
+                }
+                targetKbs = new ArrayList<>();
+                List<String> names = new ArrayList<>();
+                for (MetadataStore.KbRow kb : owned) {
+                    targetKbs.add(kb.id());
+                    names.add(kb.name());
+                }
+                effectiveKbType = "document";
+                effectiveKbName = names.isEmpty() ? "（暂无私有知识库）" : String.join("、", names);
+            } else {
+                targetKbs = List.of(ctx.kbId());
+            }
+
             // Resolved once and shared: the router decides whether the question is
             // covered by any of these, and retrieve() then searches exactly the same
             // list. Two separate lookups could disagree — the router approving a KB
             // that the cap then excludes routes rag and retrieves nothing.
+            //
+            // Unaffected by "all my knowledge bases" mode: the sentinel never
+            // equals a real global KB id, so the exclusion is a no-op and every
+            // global KB still gets merged in, same as the single-KB path.
             List<MetadataStore.KbRow> globalKbs = globalKbs(ctx.kbId());
 
             // --- Step 1: route + rewrite in a single LLM call ---
             long analyzeStart = System.nanoTime();
             sink.send("stage", stagePayload("analyzing", "start", null));
             QueryAnalyzerService.Analysis analysis = queryAnalyzer.analyze(
-                    ctx.question(), ctx.kbType(), ctx.kbName(), history, globalKbs);
+                    ctx.question(), effectiveKbType, effectiveKbName, history, globalKbs);
             sink.send("stage", stagePayload("analyzing", "done", elapsedMs(analyzeStart)));
 
             Map<String, Object> metadata = new HashMap<>();
@@ -217,7 +255,7 @@ public class ChatService {
             // --- Steps 2-4: multi-query retrieval, dedupe, rerank ---
             long retrieveStart = System.nanoTime();
             sink.send("stage", stagePayload("retrieving", "start", null));
-            List<RerankerService.Scored> candidates = retrieve(ctx, analysis, globalKbs);
+            List<RerankerService.Scored> candidates = retrieve(ctx, targetKbs, analysis, globalKbs);
             List<RerankerService.Scored> reranked =
                     rerankerService.rerank(analysis.resolvedQuery(), candidates);
             sink.send("stage", stagePayload("retrieving", "done", elapsedMs(retrieveStart)));
@@ -233,9 +271,12 @@ public class ChatService {
                     : String.join("\n\n---\n\n", contextParts);
 
             // --- Step 5: graph context ---
+            // Skipped in "all my knowledge bases" mode: Neo4j nodes are tagged
+            // by a single kb_id, so there is no single graph to query here.
             String graphContext = "";
             List<String> graphTerms = analysis.graphTerms();
-            if (("graph".equals(analysis.route()) || "hybrid".equals(analysis.route()))
+            if (targetKbs.size() == 1
+                    && ("graph".equals(analysis.route()) || "hybrid".equals(analysis.route()))
                     && !graphTerms.isEmpty()) {
                 long graphStart = System.nanoTime();
                 sink.send("stage", stagePayload("graph", "start", null));
@@ -260,7 +301,7 @@ public class ChatService {
             boolean lowConfidence = confidence < props.getLowConfidenceThreshold();
             String systemPrompt = lowConfidence
                     ? String.format(LOW_CONFIDENCE_FALLBACK_PROMPT, graphContext, context)
-                    : String.format(systemPromptTemplate(ctx.kbType()), graphContext, context);
+                    : String.format(systemPromptTemplate(effectiveKbType), graphContext, context);
             List<Message> messages = buildMessages(systemPrompt, history, ctx.question());
 
             long generateStart = System.nanoTime();
@@ -365,31 +406,49 @@ public class ChatService {
     }
 
     /**
-     * Multi-query retrieval across the target KB, its rewrites and the global KBs,
+     * Multi-query retrieval across the target KB(s), rewrites and the global KBs,
      * deduplicated by chunk text.
+     *
+     * <p>{@code targetKbs} has one entry for a normal single-KB request. In "all
+     * my knowledge bases" mode it has one entry per owned KB, and rewritten-query
+     * multi-recall is skipped on purpose — doing it per KB would multiply the
+     * search count by the KB count.
      */
-    private List<RerankerService.Scored> retrieve(ChatContext ctx,
+    private List<RerankerService.Scored> retrieve(ChatContext ctx, List<String> targetKbs,
                                                   QueryAnalyzerService.Analysis analysis,
                                                   List<MetadataStore.KbRow> globalKbs) {
         List<RetrievalService.SearchResult> all = new ArrayList<>();
 
         float[] primaryEmbedding = embeddingService.embed(analysis.resolvedQuery());
-        all.addAll(retrievalService.search(ctx.kbId(), primaryEmbedding, TOP_K_PRIMARY));
 
-        int used = 0;
-        for (String rewritten : analysis.rewrittenQueries()) {
-            if (used >= MAX_REWRITES) {
-                break;
+        if (targetKbs.size() == 1) {
+            String kbId = targetKbs.get(0);
+            all.addAll(retrievalService.search(kbId, primaryEmbedding, TOP_K_PRIMARY));
+
+            int used = 0;
+            for (String rewritten : analysis.rewrittenQueries()) {
+                if (used >= MAX_REWRITES) {
+                    break;
+                }
+                if (rewritten.equals(ctx.question()) || rewritten.equals(analysis.resolvedQuery())) {
+                    continue;
+                }
+                used++;
+                try {
+                    all.addAll(retrievalService.search(kbId,
+                            embeddingService.embed(rewritten), TOP_K_REWRITE));
+                } catch (Exception e) {
+                    log.warn("Rewritten-query retrieval failed: {}", e.getMessage());
+                }
             }
-            if (rewritten.equals(ctx.question()) || rewritten.equals(analysis.resolvedQuery())) {
-                continue;
-            }
-            used++;
-            try {
-                all.addAll(retrievalService.search(ctx.kbId(),
-                        embeddingService.embed(rewritten), TOP_K_REWRITE));
-            } catch (Exception e) {
-                log.warn("Rewritten-query retrieval failed: {}", e.getMessage());
+        } else {
+            for (String targetKb : targetKbs) {
+                try {
+                    all.addAll(retrievalService.search(targetKb, primaryEmbedding,
+                            TOP_K_ALL_MODE_PER_KB));
+                } catch (Exception e) {
+                    log.warn("All-KB-mode retrieval failed for {}: {}", targetKb, e.getMessage());
+                }
             }
         }
 

@@ -59,7 +59,23 @@ public class ChatController {
         // Resolve the caller and check permissions on the request thread: the
         // SecurityContext is thread-local and is not visible from the executor.
         CurrentUser user = CurrentUser.get();
-        MetadataStore.KbRow kb = permissions.requireKbRead(request.getKnowledgeBaseId(), user);
+
+        // The sentinel is not a real KB, so there is no ownership to check --
+        // the pipeline resolves it to the caller's own KBs internally.
+        boolean allKbMode = ChatService.ALL_KB_SENTINEL.equals(request.getKnowledgeBaseId());
+        String kbId;
+        String kbType;
+        String kbName;
+        if (allKbMode) {
+            kbId = ChatService.ALL_KB_SENTINEL;
+            kbType = "document";
+            kbName = "";
+        } else {
+            MetadataStore.KbRow kb = permissions.requireKbRead(request.getKnowledgeBaseId(), user);
+            kbId = kb.id();
+            kbType = kb.kbType();
+            kbName = kb.name();
+        }
 
         if (request.getSessionId() != null && !request.getSessionId().isBlank()) {
             MetadataStore.SessionRow session =
@@ -74,8 +90,8 @@ public class ChatController {
         emitter.onError(e -> log.debug("SSE error: {}", e.getMessage()));
 
         ChatService.ChatContext ctx = new ChatService.ChatContext(
-                request.getQuestion(), kb.id(), request.getSessionId(),
-                kb.kbType(), kb.name(), user.username());
+                request.getQuestion(), kbId, request.getSessionId(),
+                kbType, kbName, user.username());
 
         chatExecutor.execute(() -> {
             try {
