@@ -627,7 +627,7 @@ class MetadataStoreTest {
         void deletingASessionRemovesItsMessagesAndFeedback() {
             String kbId = kb("alice");
             store.createSession("s1", "t", kbId, "alice");
-            int index = store.appendMessage("s1", "assistant", "答案", null, 0.9, "rag", null);
+            int index = store.appendMessage("s1", "assistant", "答案", null, 0.9, "rag", null, null);
             store.upsertFeedback("s1", index, "alice", "up", null);
 
             store.deleteSession("s1");
@@ -668,7 +668,7 @@ class MetadataStoreTest {
             store.createSession("s1", "t", kbId, "alice");
             sql("UPDATE sessions SET updated_at = '2020-01-01T00:00:00Z' WHERE id = 's1'");
 
-            store.appendMessage("s1", "user", "问题", null, null, null, null);
+            store.appendMessage("s1", "user", "问题", null, null, null, null, null);
 
             assertThat(store.getSession("s1").updatedAt()).isNotEqualTo("2020-01-01T00:00:00Z");
         }
@@ -697,16 +697,16 @@ class MetadataStoreTest {
 
         @Test
         void indexesStartAtZeroAndIncrement() {
-            assertThat(store.appendMessage("s1", "user", "问题", null, null, null, null)).isZero();
-            assertThat(store.appendMessage("s1", "assistant", "答案", null, 0.8, "rag", null))
+            assertThat(store.appendMessage("s1", "user", "问题", null, null, null, null, null)).isZero();
+            assertThat(store.appendMessage("s1", "assistant", "答案", null, 0.8, "rag", null, null))
                     .isEqualTo(1);
         }
 
         @Test
         void indexesAreScopedToTheSession() {
             store.createSession("s2", "t", kbId, "alice");
-            store.appendMessage("s1", "user", "a", null, null, null, null);
-            assertThat(store.appendMessage("s2", "user", "b", null, null, null, null)).isZero();
+            store.appendMessage("s1", "user", "a", null, null, null, null, null);
+            assertThat(store.appendMessage("s2", "user", "b", null, null, null, null, null)).isZero();
         }
 
         @Test
@@ -714,19 +714,19 @@ class MetadataStoreTest {
             // MAX + 1, not COUNT. With COUNT, removing a message would make the next
             // one reuse a taken index, and feedback keys on (session_id,
             // message_index) — the new message would inherit the old one's rating.
-            store.appendMessage("s1", "user", "a", null, null, null, null);
-            store.appendMessage("s1", "user", "b", null, null, null, null);
-            store.appendMessage("s1", "user", "c", null, null, null, null);
+            store.appendMessage("s1", "user", "a", null, null, null, null, null);
+            store.appendMessage("s1", "user", "b", null, null, null, null, null);
+            store.appendMessage("s1", "user", "c", null, null, null, null, null);
             sql("DELETE FROM messages WHERE session_id = 's1' AND message_index = 1");
 
-            assertThat(store.appendMessage("s1", "user", "d", null, null, null, null)).isEqualTo(3);
+            assertThat(store.appendMessage("s1", "user", "d", null, null, null, null, null)).isEqualTo(3);
         }
 
         @Test
         void sourcesRoundTripAsJson() {
             List<Map<String, Object>> sources = List.of(Map.of(
                     "text", "引用内容", "score", 0.87, "source", "a.txt", "document_id", "d1"));
-            store.appendMessage("s1", "assistant", "答案", sources, 0.9, "hybrid", null);
+            store.appendMessage("s1", "assistant", "答案", sources, 0.9, "hybrid", null, null);
 
             MetadataStore.MessageRow row = store.listMessages("s1", 0).get(0);
             assertThat(row.sources()).hasSize(1);
@@ -737,7 +737,7 @@ class MetadataStoreTest {
 
         @Test
         void anEmptySourceListIsStoredAsNull() {
-            store.appendMessage("s1", "assistant", "答案", List.of(), null, null, null);
+            store.appendMessage("s1", "assistant", "答案", List.of(), null, null, null, null);
             assertThat(store.listMessages("s1", 0).get(0).sources()).isNull();
         }
 
@@ -745,14 +745,14 @@ class MetadataStoreTest {
         void aNullConfidenceStaysNull() {
             // The frontend hides the confidence bar for a user message; 0.0 would
             // render as a real "0%" reading.
-            store.appendMessage("s1", "user", "问题", null, null, null, null);
+            store.appendMessage("s1", "user", "问题", null, null, null, null, null);
             assertThat(store.listMessages("s1", 0).get(0).confidence()).isNull();
         }
 
         @Test
         void listedOldestFirst() {
-            store.appendMessage("s1", "user", "一", null, null, null, null);
-            store.appendMessage("s1", "assistant", "二", null, null, null, null);
+            store.appendMessage("s1", "user", "一", null, null, null, null, null);
+            store.appendMessage("s1", "assistant", "二", null, null, null, null, null);
             assertThat(store.listMessages("s1", 0)).extracting(MetadataStore.MessageRow::content)
                     .containsExactly("一", "二");
         }
@@ -762,7 +762,7 @@ class MetadataStoreTest {
             // This is what feeds the analyzer's history window, which reads the
             // messages in order.
             for (int i = 0; i < 5; i++) {
-                store.appendMessage("s1", "user", "m" + i, null, null, null, null);
+                store.appendMessage("s1", "user", "m" + i, null, null, null, null, null);
             }
             assertThat(store.listMessages("s1", 2)).extracting(MetadataStore.MessageRow::content)
                     .containsExactly("m3", "m4");
@@ -770,17 +770,17 @@ class MetadataStoreTest {
 
         @Test
         void aLimitOfZeroMeansEverything() {
-            store.appendMessage("s1", "user", "一", null, null, null, null);
-            store.appendMessage("s1", "user", "二", null, null, null, null);
+            store.appendMessage("s1", "user", "一", null, null, null, null, null);
+            store.appendMessage("s1", "user", "二", null, null, null, null, null);
             assertThat(store.listMessages("s1", 0)).hasSize(2);
         }
 
         @Test
         void countsComeBackInOneQuery() {
             store.createSession("s2", "t", kbId, "alice");
-            store.appendMessage("s1", "user", "a", null, null, null, null);
-            store.appendMessage("s1", "user", "b", null, null, null, null);
-            store.appendMessage("s2", "user", "c", null, null, null, null);
+            store.appendMessage("s1", "user", "a", null, null, null, null, null);
+            store.appendMessage("s1", "user", "b", null, null, null, null, null);
+            store.appendMessage("s2", "user", "c", null, null, null, null, null);
 
             assertThat(store.sessionMessageCounts()).containsEntry("s1", 2).containsEntry("s2", 1);
             assertThat(store.sessionMessageCount("s1")).isEqualTo(2);
@@ -789,7 +789,7 @@ class MetadataStoreTest {
         @Test
         void aMessageInAMissingSessionIsRejected() {
             assertThatThrownBy(() -> store.appendMessage("no-such-session", "user", "x",
-                    null, null, null, null)).isInstanceOf(MetadataStore.StoreException.class);
+                    null, null, null, null, null)).isInstanceOf(MetadataStore.StoreException.class);
         }
     }
 
@@ -800,7 +800,7 @@ class MetadataStoreTest {
         void session() {
             String kbId = kb("alice");
             store.createSession("s1", "t", kbId, "alice");
-            store.appendMessage("s1", "assistant", "答案", null, 0.9, "rag", null);
+            store.appendMessage("s1", "assistant", "答案", null, 0.9, "rag", null, null);
         }
 
         @Test
@@ -834,7 +834,7 @@ class MetadataStoreTest {
 
         @Test
         void differentMessagesAreCountedSeparately() {
-            store.appendMessage("s1", "assistant", "第二个答案", null, 0.9, "rag", null);
+            store.appendMessage("s1", "assistant", "第二个答案", null, 0.9, "rag", null, null);
             store.upsertFeedback("s1", 0, "alice", "up", null);
             store.upsertFeedback("s1", 1, "alice", "down", null);
 
@@ -846,7 +846,7 @@ class MetadataStoreTest {
         @Test
         void statsAreScopedToTheOwner() {
             store.createSession("s2", "t", kb("bob"), "bob");
-            store.appendMessage("s2", "assistant", "答案", null, null, null, null);
+            store.appendMessage("s2", "assistant", "答案", null, null, null, null, null);
             store.upsertFeedback("s1", 0, "alice", "up", null);
             store.upsertFeedback("s2", 0, "bob", "down", null);
 
@@ -857,7 +857,7 @@ class MetadataStoreTest {
         @Test
         void aNullOwnerMeansSiteWide() {
             store.createSession("s2", "t", kb("bob"), "bob");
-            store.appendMessage("s2", "assistant", "答案", null, null, null, null);
+            store.appendMessage("s2", "assistant", "答案", null, null, null, null, null);
             store.upsertFeedback("s1", 0, "alice", "up", null);
             store.upsertFeedback("s2", 0, "bob", "down", null);
 
@@ -874,9 +874,9 @@ class MetadataStoreTest {
         @Test
         void theSatisfactionRateIsARatioNotAPercentage() {
             // Both the Python backend and the frontend expect 0-1 here.
-            store.appendMessage("s1", "assistant", "b", null, null, null, null);
-            store.appendMessage("s1", "assistant", "c", null, null, null, null);
-            store.appendMessage("s1", "assistant", "d", null, null, null, null);
+            store.appendMessage("s1", "assistant", "b", null, null, null, null, null);
+            store.appendMessage("s1", "assistant", "c", null, null, null, null, null);
+            store.appendMessage("s1", "assistant", "d", null, null, null, null, null);
             store.upsertFeedback("s1", 0, "alice", "up", null);
             store.upsertFeedback("s1", 1, "alice", "up", null);
             store.upsertFeedback("s1", 2, "alice", "up", null);

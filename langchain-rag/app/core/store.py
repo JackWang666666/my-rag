@@ -353,6 +353,7 @@ def append_message(
     confidence: Optional[float] = None,
     route: Optional[str] = None,
     suggested_questions: Optional[List[str]] = None,
+    llm_calls: Optional[List[Dict[str, Any]]] = None,
 ) -> int:
     """Append a message and return its index within the session."""
     next_index = db.query_one(
@@ -362,8 +363,9 @@ def append_message(
     )["n"]
     db.execute(
         "INSERT INTO messages"
-        " (id, session_id, message_index, role, content, sources, confidence, route, suggested_questions, created_at)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        " (id, session_id, message_index, role, content, sources, confidence, route,"
+        "  suggested_questions, llm_calls, created_at)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             new_id(),
             session_id,
@@ -374,6 +376,7 @@ def append_message(
             confidence,
             route,
             json.dumps(suggested_questions, ensure_ascii=False) if suggested_questions else None,
+            json.dumps(llm_calls, ensure_ascii=False) if llm_calls else None,
             db.now_iso(),
         ),
     )
@@ -410,6 +413,12 @@ def list_messages(session_id: str, limit: Optional[int] = None) -> List[Dict[str
                 suggested_questions = json.loads(r["suggested_questions"])
             except (ValueError, TypeError):
                 suggested_questions = None
+        llm_calls = None
+        if r["llm_calls"]:
+            try:
+                llm_calls = json.loads(r["llm_calls"])
+            except (ValueError, TypeError):
+                llm_calls = None
         out.append({
             "message_index": r["message_index"],
             "role": r["role"],
@@ -418,6 +427,7 @@ def list_messages(session_id: str, limit: Optional[int] = None) -> List[Dict[str
             "confidence": r["confidence"],
             "route": r["route"],
             "suggested_questions": suggested_questions,
+            "llm_calls": llm_calls,
             "created_at": r["created_at"],
         })
     return out

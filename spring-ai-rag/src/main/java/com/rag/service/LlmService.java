@@ -4,6 +4,7 @@ import com.rag.config.ChatModelRegistry;
 import com.rag.config.SettingsStore;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
@@ -89,5 +90,91 @@ public class LlmService {
             return "";
         }
         return response.getResult().getOutput().getContent();
+    }
+
+    /**
+     * One row of the "thinking process" shown to the user — docs/CONTRACT.md
+     * section 4, event {@code llmCall}. Token fields are {@code null} (not
+     * {@code 0}) when usage could not be determined, e.g. a streamed answer on
+     * the {@code direct} route: this Spring AI version's OpenAI client has no
+     * {@code stream_options} support, so streamed usage is never available.
+     */
+    public record LlmCallRecord(String step, String model, Long promptTokens,
+                                Long completionTokens, Long totalTokens, long durationMs,
+                                String contentPreview) {}
+
+    /** Result of a logged, non-streaming call: the text plus its call record. */
+    public record Call(String content, LlmCallRecord record) {}
+
+    /**
+     * Blocking completion that also captures token usage, unlike {@link #call}.
+     * Used by callers that feed the "thinking process" (analyzer, grounding,
+     * main answer generation on rag/graph/hybrid routes).
+     */
+    public Call callLogged(String step, String prompt) {
+        return callLogged(step, new Prompt(prompt));
+    }
+
+    public Call callLogged(String step, List<Message> messages) {
+        return callLogged(step, new Prompt(messages));
+    }
+
+    private Call callLogged(String step, Prompt prompt) {
+        long start = System.nanoTime();
+        ChatModel model = getChatModel();
+        try {
+            ChatResponse response = model.call(prompt);
+            long durationMs = (System.nanoTime() - start) / 1_000_000;
+            return new Call(contentOf(response),
+                    new LlmCallRecord(step, modelNameOf(model), usagePromptTokens(response),
+                            usageCompletionTokens(response), usageTotalTokens(response),
+                            durationMs, null));
+        } catch (Exception e) {
+            long durationMs = (System.nanoTime() - start) / 1_000_000;
+            log.error("LLM call failed", e);
+            throw new LoggedCallException(e,
+                    new LlmCallRecord(step, modelNameOf(model), null, null, null, durationMs,
+                            "调用失败: " + e.getMessage()));
+        }
+    }
+
+    /** Carries the partial {@link LlmCallRecord} for a failed {@link #callLogged}. */
+    public static class LoggedCallException extends RuntimeException {
+        private final LlmCallRecord record;
+
+        public LoggedCallException(Throwable cause, LlmCallRecord record) {
+            super("LLM call failed: " + cause.getMessage(), cause);
+            this.record = record;
+        }
+
+        public LlmCallRecord record() {
+            return record;
+        }
+    }
+
+    private static String modelNameOf(ChatModel model) {
+        return model == null ? null : model.getClass().getSimpleName();
+    }
+
+    private static Usage usageOf(ChatResponse response) {
+        if (response == null || response.getMetadata() == null) {
+            return null;
+        }
+        return response.getMetadata().getUsage();
+    }
+
+    private static Long usagePromptTokens(ChatResponse response) {
+        Usage usage = usageOf(response);
+        return usage == null ? null : usage.getPromptTokens();
+    }
+
+    private static Long usageCompletionTokens(ChatResponse response) {
+        Usage usage = usageOf(response);
+        return usage == null ? null : usage.getGenerationTokens();
+    }
+
+    private static Long usageTotalTokens(ChatResponse response) {
+        Usage usage = usageOf(response);
+        return usage == null ? null : usage.getTotalTokens();
     }
 }

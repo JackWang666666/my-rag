@@ -15,7 +15,12 @@ from app.models.schemas import MessageItem, SessionResponse
 from app.services.embedding import get_embeddings
 from app.services.graph import get_graph_context
 from app.services.llm import get_chat_model
-from app.services.query_analyzer import analyze_query, generate_suggested_questions
+from app.services.query_analyzer import (
+    analyze_query,
+    call_record,
+    generate_suggested_questions,
+    usage_from_message,
+)
 from app.services.reranker import clamp01, rerank
 from app.services.retrieval import search
 
@@ -189,19 +194,26 @@ async def chat_stream(
     else:
         target_kbs = [kb_id]
 
+    # Every independent LLM call in this exchange gets one row here -- the
+    # "thinking process" shown to the user (docs/CONTRACT.md section 4, event
+    # `llmCall`), persisted alongside the message so history replay has it too.
+    llm_calls: List[Dict[str, Any]] = []
+
     try:
         history = _history_dicts(session_id)
 
         # --- Step 1: Route + rewrite in a single LLM call ---
         t0 = time.monotonic()
         yield {"event": "stage", "data": {"stage": "analyzing", "status": "start"}}
-        analysis = await analyze_query(
+        analysis, analyze_call = await analyze_query(
             question=question,
             kb_type=kb_type,
             kb_name=kb_name,
             chat_history=history,
         )
         route = analysis["route"]
+        llm_calls.append(analyze_call)
+        yield {"event": "llmCall", "data": analyze_call}
         yield {
             "event": "stage",
             "data": {
@@ -234,20 +246,34 @@ async def chat_stream(
             t0 = time.monotonic()
             yield {"event": "stage", "data": {"stage": "generating", "status": "start"}}
             full_response = ""
+            usage_chunk = None
             async for chunk in llm.astream(messages):
                 if chunk.content:
                     full_response += chunk.content
                     yield {"event": "chunk", "data": chunk.content}
+                if chunk.usage_metadata:
+                    usage_chunk = chunk
+            generate_duration_ms = int((time.monotonic() - t0) * 1000)
             yield {
                 "event": "stage",
                 "data": {
                     "stage": "generating",
                     "status": "done",
-                    "elapsedMs": int((time.monotonic() - t0) * 1000),
+                    "elapsedMs": generate_duration_ms,
                 },
             }
+            generate_call = call_record(
+                "generating",
+                llm,
+                generate_duration_ms,
+                usage=usage_from_message(usage_chunk) if usage_chunk else None,
+            )
+            llm_calls.append(generate_call)
+            yield {"event": "llmCall", "data": generate_call}
 
-            suggested_questions = await generate_suggested_questions(question, full_response)
+            suggested_questions, suggest_call = await generate_suggested_questions(question, full_response)
+            llm_calls.append(suggest_call)
+            yield {"event": "llmCall", "data": suggest_call}
             if suggested_questions:
                 yield {"event": "suggestedQuestions", "data": suggested_questions}
 
@@ -259,6 +285,7 @@ async def chat_stream(
                 confidence=0.9,
                 route=route,
                 suggested_questions=suggested_questions or None,
+                llm_calls=llm_calls or None,
             )
 
             yield {"event": "done", "data": ""}
@@ -383,6 +410,7 @@ async def chat_stream(
 
         llm = get_chat_model(streaming=True)
         full_response = ""
+        usage_chunk = None
 
         t0 = time.monotonic()
         yield {"event": "stage", "data": {"stage": "generating", "status": "start"}}
@@ -390,14 +418,25 @@ async def chat_stream(
             if chunk.content:
                 full_response += chunk.content
                 yield {"event": "chunk", "data": chunk.content}
+            if chunk.usage_metadata:
+                usage_chunk = chunk
+        generate_duration_ms = int((time.monotonic() - t0) * 1000)
         yield {
             "event": "stage",
             "data": {
                 "stage": "generating",
                 "status": "done",
-                "elapsedMs": int((time.monotonic() - t0) * 1000),
+                "elapsedMs": generate_duration_ms,
             },
         }
+        generate_call = call_record(
+            "generating",
+            llm,
+            generate_duration_ms,
+            usage=usage_from_message(usage_chunk) if usage_chunk else None,
+        )
+        llm_calls.append(generate_call)
+        yield {"event": "llmCall", "data": generate_call}
 
         # --- Step 8: Append guidance if low confidence ---
         if confidence_score < 0.5:
@@ -411,7 +450,9 @@ async def chat_stream(
         if sources:
             yield {"event": "sources", "data": sources}
 
-        suggested_questions = await generate_suggested_questions(question, full_response)
+        suggested_questions, suggest_call = await generate_suggested_questions(question, full_response)
+        llm_calls.append(suggest_call)
+        yield {"event": "llmCall", "data": suggest_call}
         if suggested_questions:
             yield {"event": "suggestedQuestions", "data": suggested_questions}
 
@@ -425,6 +466,7 @@ async def chat_stream(
             confidence=confidence_score,
             route=route,
             suggested_questions=suggested_questions or None,
+            llm_calls=llm_calls or None,
         )
 
         yield {"event": "done", "data": ""}
@@ -440,6 +482,7 @@ def _to_message_item(msg: Dict[str, Any]) -> MessageItem:
         content=msg["content"],
         sources=msg["sources"],
         suggested_questions=msg.get("suggested_questions"),
+        llm_calls=msg.get("llm_calls"),
         timestamp=db.parse_iso(msg["created_at"]),
     )
 

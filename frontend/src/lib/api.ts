@@ -4,6 +4,7 @@ import type {
   ChatMessage,
   ChatMetadata,
   StageEvent,
+  LlmCallRecord,
   GraphData,
   Settings,
   SettingsUpdate,
@@ -394,6 +395,7 @@ export interface ChatStreamHandlers {
   onChunk: (text: string) => void;
   onSources?: (sources: ChatMessage["sources"]) => void;
   onSuggestedQuestions?: (questions: string[]) => void;
+  onLlmCall?: (call: LlmCallRecord) => void;
   onDone: (sources?: ChatMessage["sources"]) => void;
   onError: (error: string) => void;
 }
@@ -466,6 +468,13 @@ export function chatStream(
           if (Array.isArray(parsed)) handlers.onSuggestedQuestions?.(parsed);
         } catch {
           /* a malformed suggestedQuestions frame is not worth failing the answer over */
+        }
+        break;
+      case "llmCall":
+        try {
+          handlers.onLlmCall?.(JSON.parse(data) as LlmCallRecord);
+        } catch {
+          /* a malformed llmCall frame is not worth failing the answer over */
         }
         break;
       case "done":

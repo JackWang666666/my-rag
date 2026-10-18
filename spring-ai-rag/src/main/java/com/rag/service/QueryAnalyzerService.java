@@ -116,27 +116,40 @@ public class QueryAnalyzerService {
      *                  same, already-capped list, not everything in the database.
      *                  Routing {@code rag} for a KB that is then not searched is no
      *                  better than routing {@code direct}.
+     * @param callLog   the "thinking process" for this exchange; one row is appended
+     *                  here regardless of success or failure (docs/CONTRACT.md section 4).
      */
     public Analysis analyze(String question, String kbType, String kbName,
                             List<MetadataStore.MessageRow> history,
-                            List<MetadataStore.KbRow> globalKbs) {
+                            List<MetadataStore.KbRow> globalKbs,
+                            List<LlmService.LlmCallRecord> callLog) {
+        String prompt = String.format(ANALYZE_PROMPT,
+                kbType == null || kbType.isBlank() ? "document" : kbType,
+                kbName == null || kbName.isBlank() ? "未命名" : kbName,
+                formatGlobalKbs(globalKbs),
+                formatHistory(history),
+                question);
+
+        LlmService.Call result;
+        try {
+            result = llmService.callLogged("analyzing", prompt);
+        } catch (LlmService.LoggedCallException e) {
+            log.warn("Query analysis failed, defaulting to RAG: {}", e.getMessage());
+            callLog.add(e.record());
+            return fallback(question, "查询分析失败，使用默认RAG");
+        }
+
         Map<String, Object> raw;
         try {
-            String prompt = String.format(ANALYZE_PROMPT,
-                    kbType == null || kbType.isBlank() ? "document" : kbType,
-                    kbName == null || kbName.isBlank() ? "未命名" : kbName,
-                    formatGlobalKbs(globalKbs),
-                    formatHistory(history),
-                    question);
-
-            String response = llmService.call(prompt);
-            raw = gson.fromJson(GraphService.stripCodeFence(response),
+            raw = gson.fromJson(GraphService.stripCodeFence(result.content()),
                     new TypeToken<Map<String, Object>>() {}.getType());
         } catch (Exception e) {
             log.warn("Query analysis failed, defaulting to RAG: {}", e.getMessage());
+            callLog.add(withPreview(result.record(), "查询分析返回格式异常，使用默认RAG"));
             return fallback(question, "查询分析失败，使用默认RAG");
         }
         if (raw == null) {
+            callLog.add(withPreview(result.record(), "查询分析返回格式异常，使用默认RAG"));
             return fallback(question, "查询分析返回格式异常，使用默认RAG");
         }
 
@@ -150,17 +163,27 @@ public class QueryAnalyzerService {
         String resolvedQuery = resolved instanceof String s && !s.isBlank() ? s.trim() : question;
 
         Object reason = pick(raw, "reason");
+        String reasonText = reason instanceof String s ? s : "";
+
+        callLog.add(withPreview(result.record(),
+                reasonText.isEmpty() ? "route=" + route : "route=" + route + ", reason=" + reasonText));
 
         return new Analysis(
                 route,
                 confidence,
-                reason instanceof String s ? s : "",
+                reasonText,
                 intent,
                 resolvedQuery,
                 asStringList(pick(raw, "rewrittenQueries", "rewritten_queries"), 3),
                 asStringList(pick(raw, "keywords"), 8),
                 asStringList(pick(raw, "graphEntities", "graph_entities"), 8),
                 complexity);
+    }
+
+    /** Copies a record with its {@code contentPreview} replaced -- records are immutable. */
+    private static LlmService.LlmCallRecord withPreview(LlmService.LlmCallRecord record, String preview) {
+        return new LlmService.LlmCallRecord(record.step(), record.model(), record.promptTokens(),
+                record.completionTokens(), record.totalTokens(), record.durationMs(), preview);
     }
 
     /**
@@ -282,17 +305,30 @@ public class QueryAnalyzerService {
      * "猜你想问": 2-4 follow-up questions generated from the finished Q&amp;A, in a
      * separate blocking LLM call after the main answer is done streaming. See
      * {@code docs/CONTRACT.md} section 4. Fails open with an empty list, same as
-     * {@link #analyze} and {@link GroundingService#isGrounded}.
+     * {@link #analyze} and {@link GroundingService#isGrounded}; the call is still
+     * logged to {@code callLog} either way.
      */
-    public List<String> generateSuggestedQuestions(String question, String answer) {
+    public List<String> generateSuggestedQuestions(String question, String answer,
+                                                    List<LlmService.LlmCallRecord> callLog) {
+        String prompt = String.format(SUGGESTED_QUESTIONS_PROMPT, question, answer);
+        LlmService.Call result;
         try {
-            String prompt = String.format(SUGGESTED_QUESTIONS_PROMPT, question, answer);
-            String response = llmService.call(prompt);
-            Object raw = gson.fromJson(GraphService.stripCodeFence(response),
+            result = llmService.callLogged("suggesting", prompt);
+        } catch (LlmService.LoggedCallException e) {
+            log.warn("Suggested questions generation failed: {}", e.getMessage());
+            callLog.add(e.record());
+            return List.of();
+        }
+
+        try {
+            Object raw = gson.fromJson(GraphService.stripCodeFence(result.content()),
                     new TypeToken<List<Object>>() {}.getType());
-            return asStringList(raw, 4);
+            List<String> questions = asStringList(raw, 4);
+            callLog.add(withPreview(result.record(), questions.isEmpty() ? null : gson.toJson(questions)));
+            return questions;
         } catch (Exception e) {
             log.warn("Suggested questions generation failed: {}", e.getMessage());
+            callLog.add(withPreview(result.record(), "生成猜你想问失败: " + e.getMessage()));
             return List.of();
         }
     }

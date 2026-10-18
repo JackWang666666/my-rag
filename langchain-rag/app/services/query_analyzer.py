@@ -11,7 +11,8 @@ section 8.
 
 import json
 import logging
-from typing import Any, Dict, List, Optional
+import time
+from typing import Any, Dict, List, Optional, Tuple
 
 from langchain_core.messages import HumanMessage
 
@@ -158,12 +159,48 @@ def _format_history(chat_history: Optional[List[dict]]) -> str:
     return "\n".join(parts) if parts else "无"
 
 
+def usage_from_message(message: Any) -> Dict[str, Optional[int]]:
+    """Token counts from an AIMessage's usage_metadata, or all-null if absent.
+
+    LangChain already normalises every provider's usage payload to this one
+    shape (input_tokens/output_tokens/total_tokens) -- see llm.py's stream_usage
+    comment for why it can still be missing on a streamed response.
+    """
+    usage = getattr(message, "usage_metadata", None) or {}
+    return {
+        "promptTokens": usage.get("input_tokens"),
+        "completionTokens": usage.get("output_tokens"),
+        "totalTokens": usage.get("total_tokens"),
+    }
+
+
+def call_record(
+    step: str,
+    model: Any,
+    duration_ms: int,
+    usage: Optional[Dict[str, Optional[int]]] = None,
+    content_preview: Optional[str] = None,
+) -> Dict[str, Any]:
+    """One row of the 'thinking process' shown to the user -- docs/CONTRACT.md
+    section 4, event `llmCall`."""
+    usage = usage or {"promptTokens": None, "completionTokens": None, "totalTokens": None}
+    return {
+        "step": step,
+        "model": getattr(model, "model_name", None),
+        "promptTokens": usage.get("promptTokens"),
+        "completionTokens": usage.get("completionTokens"),
+        "totalTokens": usage.get("totalTokens"),
+        "durationMs": duration_ms,
+        "contentPreview": content_preview,
+    }
+
+
 async def analyze_query(
     question: str,
     kb_type: str = "document",
     kb_name: str = "",
     chat_history: Optional[List[dict]] = None,
-) -> Dict[str, Any]:
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Route and rewrite a query in one LLM call.
 
     Args:
@@ -173,12 +210,15 @@ async def analyze_query(
         chat_history: Recent messages as {role, content} dicts.
 
     Returns:
-        Dict with snake_case keys: route, confidence, reason, intent,
-        resolved_query, rewritten_queries, keywords, graph_entities, complexity.
+        (analysis, call_record): analysis has snake_case keys (route,
+        confidence, reason, intent, resolved_query, rewritten_queries,
+        keywords, graph_entities, complexity); call_record is the `llmCall`
+        row for this step (docs/CONTRACT.md section 4).
     """
+    llm = None
+    t0 = time.monotonic()
     try:
         llm = get_chat_model(streaming=False)
-
         prompt = ANALYZE_PROMPT.format(
             kb_type=kb_type,
             kb_name=kb_name or "未命名",
@@ -187,12 +227,18 @@ async def analyze_query(
         )
 
         response = await llm.ainvoke([HumanMessage(content=prompt)])
+        duration_ms = int((time.monotonic() - t0) * 1000)
         raw = json.loads(_strip_code_fence(response.content))
         if not isinstance(raw, dict):
-            return _fallback(question, "查询分析返回格式异常，使用默认RAG")
+            record = call_record(
+                "analyzing", llm, duration_ms, content_preview="查询分析返回格式异常，使用默认RAG"
+            )
+            return _fallback(question, "查询分析返回格式异常，使用默认RAG"), record
     except Exception as e:
         logger.warning("Query analysis failed, defaulting to RAG: %s", e)
-        return _fallback(question, "查询分析失败，使用默认RAG")
+        duration_ms = int((time.monotonic() - t0) * 1000)
+        record = call_record("analyzing", llm, duration_ms, content_preview="查询分析失败，使用默认RAG")
+        return _fallback(question, "查询分析失败，使用默认RAG"), record
 
     # The model may answer in either camelCase (as asked) or snake_case.
     def pick(*names):
@@ -212,11 +258,12 @@ async def analyze_query(
     resolved_query = resolved.strip() if isinstance(resolved, str) and resolved.strip() else question
 
     reason = pick("reason")
+    reason = reason if isinstance(reason, str) else ""
 
-    return {
+    analysis = {
         "route": route,
         "confidence": confidence,
-        "reason": reason if isinstance(reason, str) else "",
+        "reason": reason,
         "intent": intent,
         "resolved_query": resolved_query,
         "rewritten_queries": _as_str_list(pick("rewrittenQueries", "rewritten_queries"), 3),
@@ -224,6 +271,14 @@ async def analyze_query(
         "graph_entities": _as_str_list(pick("graphEntities", "graph_entities"), 8),
         "complexity": complexity,
     }
+    record = call_record(
+        "analyzing",
+        llm,
+        duration_ms,
+        usage=usage_from_message(response),
+        content_preview="route=%s, reason=%s" % (route, reason) if reason else "route=%s" % route,
+    )
+    return analysis, record
 
 
 async def generate_hyde_document(question: str) -> str:
@@ -239,15 +294,31 @@ async def generate_hyde_document(question: str) -> str:
         return question
 
 
-async def generate_suggested_questions(question: str, answer: str) -> List[str]:
-    """Generate 2-4 follow-up questions from the finished Q&A (see docs/CONTRACT.md section 4)."""
+async def generate_suggested_questions(question: str, answer: str) -> Tuple[List[str], Dict[str, Any]]:
+    """Generate 2-4 follow-up questions from the finished Q&A (see docs/CONTRACT.md section 4).
+
+    Returns (questions, call_record): call_record is this step's `llmCall` row.
+    """
+    llm = None
+    t0 = time.monotonic()
     try:
         llm = get_chat_model(streaming=False)
         response = await llm.ainvoke(
             [HumanMessage(content=SUGGESTED_QUESTIONS_PROMPT.format(question=question, answer=answer))]
         )
+        duration_ms = int((time.monotonic() - t0) * 1000)
         raw = json.loads(_strip_code_fence(response.content))
-        return _as_str_list(raw, 4)
+        questions = _as_str_list(raw, 4)
+        record = call_record(
+            "suggesting",
+            llm,
+            duration_ms,
+            usage=usage_from_message(response),
+            content_preview=json.dumps(questions, ensure_ascii=False) if questions else None,
+        )
+        return questions, record
     except Exception as e:
         logger.warning("Suggested questions generation failed: %s", e)
-        return []
+        duration_ms = int((time.monotonic() - t0) * 1000)
+        record = call_record("suggesting", llm, duration_ms, content_preview="生成猜你想问失败: %s" % e)
+        return [], record

@@ -73,10 +73,14 @@ public class MetadataStore {
      * keys {@code text}, {@code score}, {@code source}, {@code document_id} and
      * {@code rerank_score}. Null when the message has none. {@code suggestedQuestions}
      * is the "猜你想问" follow-up list, also null when none were generated.
+     * {@code llmCalls} is the "thinking process" -- one row per independent LLM
+     * call behind this answer (docs/CONTRACT.md section 4) -- null for user
+     * messages or when nothing was logged.
      */
     public record MessageRow(int messageIndex, String role, String content,
                              List<Map<String, Object>> sources, Double confidence, String route,
-                             List<String> suggestedQuestions, String createdAt) {}
+                             List<String> suggestedQuestions, List<Map<String, Object>> llmCalls,
+                             String createdAt) {}
 
     public record FeedbackStats(int total, int positive, int negative, double satisfactionRate) {}
 
@@ -380,18 +384,19 @@ public class MetadataStore {
     /** Append a message and return its index within the session. */
     public int appendMessage(String sessionId, String role, String content,
                              List<Map<String, Object>> sources, Double confidence, String route,
-                             List<String> suggestedQuestions) {
+                             List<String> suggestedQuestions, List<Map<String, Object>> llmCalls) {
         int nextIndex = count("SELECT COALESCE(MAX(message_index) + 1, 0) FROM messages"
                 + " WHERE session_id = ?", sessionId);
         update("INSERT INTO messages"
                         + " (id, session_id, message_index, role, content, sources, confidence, route,"
-                        + "  suggested_questions, created_at)"
-                        + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        + "  suggested_questions, llm_calls, created_at)"
+                        + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 newId(), sessionId, nextIndex, role, content,
                 sources == null || sources.isEmpty() ? null : gson.toJson(sources),
                 confidence, route,
                 suggestedQuestions == null || suggestedQuestions.isEmpty()
                         ? null : gson.toJson(suggestedQuestions),
+                llmCalls == null || llmCalls.isEmpty() ? null : gson.toJson(llmCalls),
                 Db.nowIso());
         touchSession(sessionId);
         return nextIndex;
@@ -494,7 +499,8 @@ public class MetadataStore {
         return new MessageRow(rs.getInt("message_index"), rs.getString("role"),
                 rs.getString("content"), parseSources(rs.getString("sources")),
                 boxedConfidence, rs.getString("route"),
-                parseStringList(rs.getString("suggested_questions")), rs.getString("created_at"));
+                parseStringList(rs.getString("suggested_questions")),
+                parseSources(rs.getString("llm_calls")), rs.getString("created_at"));
     }
 
     private Map<String, Object> parseMetadata(String json) {

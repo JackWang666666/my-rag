@@ -89,6 +89,7 @@ CREATE TABLE IF NOT EXISTS messages (
     confidence           REAL,
     route                TEXT,
     suggested_questions  TEXT,                       -- JSON 字符串数组，仅 assistant 消息可能有
+    llm_calls            TEXT,                       -- JSON 数组，每轮 LLM 调用一条记录，仅 assistant 消息可能有
     created_at           TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
@@ -146,6 +147,7 @@ CREATE TABLE IF NOT EXISTS feedback (
 | `chunk` | 正文片段（纯文本） | 流式多次 |
 | `sources` | JSON 数组 | 正文结束后 |
 | `suggestedQuestions` | JSON 字符串数组，如 `["问题1","问题2"]` | 正文（及 sources）结束后，done 之前；生成失败或为空时跳过该事件 |
+| `llmCall` | `{"step","model","promptTokens","completionTokens","totalTokens","durationMs","contentPreview"}` | 每次独立 LLM 调用结束后发出一次，可发生多次，与其它事件交错 |
 | `done` | 空字符串 | 最后 |
 | `error` | 错误信息（纯文本） | 出错时，替代 done |
 
@@ -165,6 +167,25 @@ CREATE TABLE IF NOT EXISTS feedback (
 正文生成都是不同的调用），2-4 条，纯粹是产品层的"猜你想问"推荐，不代表模型真实
 推理过程。随消息持久化到 `messages.suggested_questions`，`GET /api/chat/history/{sessionId}`
 返回的每条消息里也带 `suggestedQuestions` 字段（无则为空数组或省略）。
+
+`llmCall` 把一问一答背后调用大模型的每一步都暴露给前端做"思考过程"展示。`step`
+取值：`analyzing`（路由分析+查询改写）、`generating`（主回答生成）、`suggesting`
+（猜你想问）；Java 端在 rag/graph/hybrid 路由上还会额外发出 `grounding`（忠实性
+校验）和 `regenerate`（校验失败或疑似拒答后的重新生成），Python 端目前没有这两
+步，这是两端允许的既有分歧（见第8节关于 GroundingService 的说明）。
+
+`promptTokens`/`completionTokens`/`totalTokens` 在拿不到时为 `null`（不是 `0`），
+典型场景：Java 端 `generating` 步若命中 `direct` 路由（纯流式，当前 Spring AI
+1.0.0-M1 版本的 OpenAI 协议请求体不支持 `stream_options`，拿不到流式 usage），
+三个 token 字段固定为 `null`，但 `durationMs` 仍然准确；LLM 调用本身失败时同样
+token 为 `null`，`contentPreview` 写明失败原因。`contentPreview` 只给非正文类
+步骤（analyzing 的路由结论、suggesting 的问题列表、grounding 的判定理由）；
+`generating` 步骤的正文已经在 `chunk`/`content` 里，这里固定为 `null`，避免重复。
+
+一问一答期间产生的全部 `llmCall` 记录随 assistant 消息一起持久化到
+`messages.llm_calls`（JSON 数组），`GET /api/chat/history/{sessionId}` 返回的每条
+消息里也带 `llmCalls` 字段（无则为空数组或省略），供历史会话回放时复现完整的
+多轮思考过程。
 
 ## 5. REST 契约
 

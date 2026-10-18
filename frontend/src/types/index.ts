@@ -72,6 +72,8 @@ export interface ChatMessage {
   stages?: StageEvent[];
   /** "猜你想问" follow-up questions, from the `suggestedQuestions` SSE event. */
   suggestedQuestions?: string[];
+  /** Every independent LLM call behind this answer, from `llmCall` SSE events. */
+  llmCalls?: LlmCallRecord[];
 }
 
 /** Payload of the `stage` SSE event (contract section 4). */
@@ -80,6 +82,22 @@ export interface StageEvent {
   status: "start" | "done";
   /** Only set on `status === "done"`. */
   elapsedMs?: number;
+}
+
+/**
+ * Payload of the `llmCall` SSE event (contract section 4): one row of the
+ * "thinking process" shown to the user. `promptTokens`/`completionTokens`/
+ * `totalTokens` are `null` (not `0`) when usage could not be determined --
+ * e.g. a streamed answer on the Java backend's `direct` route.
+ */
+export interface LlmCallRecord {
+  step: "analyzing" | "generating" | "suggesting" | "grounding" | "regenerate" | string;
+  model?: string | null;
+  promptTokens?: number | null;
+  completionTokens?: number | null;
+  totalTokens?: number | null;
+  durationMs: number;
+  contentPreview?: string | null;
 }
 
 /** Payload of the `metadata` SSE event (contract section 4). */

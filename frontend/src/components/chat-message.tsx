@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { MessageFeedback } from "@/components/message-feedback";
 import { ConfidenceIndicator } from "@/components/confidence-indicator";
 import { SuggestedQuestions } from "@/components/suggested-questions";
+import { ThinkingProcess } from "@/components/thinking-process";
 import type { ChatMessage as ChatMessageType, StageEvent } from "@/types";
 
 const STAGE_LABELS: Record<StageEvent["stage"], string> = {
@@ -157,6 +158,11 @@ export function ChatMessage({
           {message.stages && message.stages.length > 0 && (
             <StageTimeline stages={message.stages} isStreaming={isStreaming} />
           )}
+
+          {/* Thinking process: every individual LLM call behind this answer,
+              with token usage. Shown as it streams in, not gated on
+              !isStreaming -- `llmCall` events arrive progressively. */}
+          <ThinkingProcess calls={message.llmCalls} />
 
           {/* Message content */}
           <div className="text-sm leading-relaxed">

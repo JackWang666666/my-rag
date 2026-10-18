@@ -96,6 +96,7 @@ public class Db {
                 confidence           REAL,
                 route                TEXT,
                 suggested_questions  TEXT,
+                llm_calls            TEXT,
                 created_at           TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
@@ -187,6 +188,19 @@ public class Db {
         }
         if (!hasSuggestedQuestions) {
             st.executeUpdate("ALTER TABLE messages ADD COLUMN suggested_questions TEXT");
+        }
+
+        boolean hasLlmCalls = false;
+        try (ResultSet rs = st.executeQuery("PRAGMA table_info(messages)")) {
+            while (rs.next()) {
+                if ("llm_calls".equals(rs.getString("name"))) {
+                    hasLlmCalls = true;
+                    break;
+                }
+            }
+        }
+        if (!hasLlmCalls) {
+            st.executeUpdate("ALTER TABLE messages ADD COLUMN llm_calls TEXT");
         }
     }
 

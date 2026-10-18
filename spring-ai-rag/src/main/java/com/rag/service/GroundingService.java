@@ -5,6 +5,7 @@ import com.google.gson.reflect.TypeToken;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -57,30 +58,47 @@ public class GroundingService {
      * Fails open (returns {@code true}): an unreliable verifier should not turn
      * into a retry on every single request, matching how
      * {@link QueryAnalyzerService} and {@link RerankerService} degrade to a safe
-     * default rather than propagating.
+     * default rather than propagating. The call is logged to {@code callLog}
+     * either way (docs/CONTRACT.md section 4, step {@code grounding}).
      */
-    public boolean isGrounded(String question, String context, String answer) {
+    public boolean isGrounded(String question, String context, String answer,
+                              List<LlmService.LlmCallRecord> callLog) {
+        String prompt = String.format(GROUNDING_PROMPT,
+                truncate(context, CONTEXT_CHARS), question, truncate(answer, ANSWER_CHARS));
+        LlmService.Call result;
         try {
-            String prompt = String.format(GROUNDING_PROMPT,
-                    truncate(context, CONTEXT_CHARS), question, truncate(answer, ANSWER_CHARS));
-            String response = llmService.call(prompt);
-            Map<String, Object> raw = gson.fromJson(GraphService.stripCodeFence(response),
-                    new TypeToken<Map<String, Object>>() {}.getType());
-            if (raw == null) {
-                return true;
-            }
-            Object grounded = raw.get("grounded");
-            if (grounded instanceof Boolean b) {
-                return b;
-            }
-            if (grounded instanceof String s) {
-                return !"false".equalsIgnoreCase(s.trim());
-            }
-            return true;
-        } catch (Exception e) {
+            result = llmService.callLogged("grounding", prompt);
+        } catch (LlmService.LoggedCallException e) {
             log.warn("Grounding check failed, assuming grounded: {}", e.getMessage());
+            callLog.add(e.record());
             return true;
         }
+
+        try {
+            Map<String, Object> raw = gson.fromJson(GraphService.stripCodeFence(result.content()),
+                    new TypeToken<Map<String, Object>>() {}.getType());
+            boolean grounded = true;
+            if (raw != null) {
+                Object value = raw.get("grounded");
+                if (value instanceof Boolean b) {
+                    grounded = b;
+                } else if (value instanceof String s) {
+                    grounded = !"false".equalsIgnoreCase(s.trim());
+                }
+            }
+            callLog.add(withPreview(result.record(), "grounded=" + grounded));
+            return grounded;
+        } catch (Exception e) {
+            log.warn("Grounding check failed, assuming grounded: {}", e.getMessage());
+            callLog.add(withPreview(result.record(), "忠实性校验解析失败: " + e.getMessage()));
+            return true;
+        }
+    }
+
+    /** Copies a record with its {@code contentPreview} replaced -- records are immutable. */
+    private static LlmService.LlmCallRecord withPreview(LlmService.LlmCallRecord record, String preview) {
+        return new LlmService.LlmCallRecord(record.step(), record.model(), record.promptTokens(),
+                record.completionTokens(), record.totalTokens(), record.durationMs(), preview);
     }
 
     private static String truncate(String text, int max) {

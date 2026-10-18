@@ -196,6 +196,12 @@ public class ChatService {
             return;
         }
 
+        // Every independent LLM call in this exchange gets one row here -- the
+        // "thinking process" shown to the user (docs/CONTRACT.md section 4,
+        // event `llmCall`), persisted alongside the message so history replay
+        // has it too.
+        List<LlmService.LlmCallRecord> callLog = new ArrayList<>();
+
         try {
             List<MetadataStore.MessageRow> history = store.listMessages(sessionId, HISTORY_WINDOW);
 
@@ -236,8 +242,9 @@ public class ChatService {
             long analyzeStart = System.nanoTime();
             sink.send("stage", stagePayload("analyzing", "start", null));
             QueryAnalyzerService.Analysis analysis = queryAnalyzer.analyze(
-                    ctx.question(), effectiveKbType, effectiveKbName, history, globalKbs);
+                    ctx.question(), effectiveKbType, effectiveKbName, history, globalKbs, callLog);
             sink.send("stage", stagePayload("analyzing", "done", elapsedMs(analyzeStart)));
+            sink.send("llmCall", callLog.get(callLog.size() - 1));
 
             Map<String, Object> metadata = new HashMap<>();
             metadata.put("route", analysis.route());
@@ -248,7 +255,7 @@ public class ChatService {
             sink.send("metadata", metadata);
 
             if ("direct".equals(analysis.route())) {
-                streamDirect(ctx, sessionId, history, sink);
+                streamDirect(ctx, sessionId, history, sink, callLog);
                 return;
             }
 
@@ -306,7 +313,8 @@ public class ChatService {
 
             long generateStart = System.nanoTime();
             sink.send("stage", stagePayload("generating", "start", null));
-            String answerText = llmService.call(messages);
+            LlmService.Call generateResult = callLogged("generating", messages, callLog, sink);
+            String answerText = generateResult.content();
 
             // Grounding only makes sense when the model was told to stick to the
             // context; skip it for the low-confidence fallback, where answering
@@ -315,12 +323,15 @@ public class ChatService {
             if (hasMaterial && !lowConfidence) {
                 String groundingContext = graphContext.isEmpty()
                         ? context : graphContext + "\n\n" + context;
-                if (!groundingService.isGrounded(ctx.question(), groundingContext, answerText)) {
+                boolean grounded = groundingService.isGrounded(
+                        ctx.question(), groundingContext, answerText, callLog);
+                sink.send("llmCall", callLog.get(callLog.size() - 1));
+                if (!grounded) {
                     log.info("Answer failed grounding check for session {}, regenerating once",
                             sessionId);
                     List<Message> retryMessages = buildMessages(
                             systemPrompt + REGENERATE_HINT, history, ctx.question());
-                    answerText = llmService.call(retryMessages);
+                    answerText = callLogged("regenerate", retryMessages, callLog, sink).content();
                     // Retry cap is 1: whatever comes back now is final, not re-checked.
                 }
             }
@@ -338,7 +349,7 @@ public class ChatService {
                 List<Message> fallbackMessages = buildMessages(
                         String.format(LOW_CONFIDENCE_FALLBACK_PROMPT, graphContext, context),
                         history, ctx.question());
-                answerText = llmService.call(fallbackMessages);
+                answerText = callLogged("regenerate", fallbackMessages, callLog, sink).content();
             }
 
             sink.send("stage", stagePayload("generating", "done", elapsedMs(generateStart)));
@@ -351,16 +362,18 @@ public class ChatService {
             }
 
             List<String> suggestedQuestions =
-                    queryAnalyzer.generateSuggestedQuestions(ctx.question(), answer.toString());
+                    queryAnalyzer.generateSuggestedQuestions(ctx.question(), answer.toString(), callLog);
+            sink.send("llmCall", callLog.get(callLog.size() - 1));
             if (!suggestedQuestions.isEmpty()) {
                 sink.send("suggestedQuestions", suggestedQuestions);
             }
 
             // --- Step 9: persist the exchange ---
-            store.appendMessage(sessionId, "user", ctx.question(), null, null, null, null);
+            store.appendMessage(sessionId, "user", ctx.question(), null, null, null, null, null);
             store.appendMessage(sessionId, "assistant", answer.toString(),
                     sources.isEmpty() ? null : sources, confidence, analysis.route(),
-                    suggestedQuestions.isEmpty() ? null : suggestedQuestions);
+                    suggestedQuestions.isEmpty() ? null : suggestedQuestions,
+                    callLogAsMaps(callLog));
 
             sink.send("done", "");
 
@@ -375,7 +388,8 @@ public class ChatService {
     }
 
     private void streamDirect(ChatContext ctx, String sessionId,
-                              List<MetadataStore.MessageRow> history, EventSink sink)
+                              List<MetadataStore.MessageRow> history, EventSink sink,
+                              List<LlmService.LlmCallRecord> callLog)
             throws Exception {
         // A direct answer skips retrieval entirely, so its confidence is a fixed
         // high value rather than something derived from (absent) sources.
@@ -390,19 +404,65 @@ public class ChatService {
             answer.append(delta);
             sink.send("chunk", delta);
         }
-        sink.send("stage", stagePayload("generating", "done", elapsedMs(generateStart)));
+        long generateDurationMs = elapsedMs(generateStart);
+        sink.send("stage", stagePayload("generating", "done", generateDurationMs));
+
+        // Token usage is unavailable here: this Spring AI version's OpenAI
+        // client has no `stream_options` support, so a streamed response never
+        // carries usage (docs/CONTRACT.md section 4). Duration is still real.
+        LlmService.LlmCallRecord generateCall = new LlmService.LlmCallRecord(
+                "generating", null, null, null, null, generateDurationMs, null);
+        callLog.add(generateCall);
+        sink.send("llmCall", generateCall);
 
         List<String> suggestedQuestions =
-                queryAnalyzer.generateSuggestedQuestions(ctx.question(), answer.toString());
+                queryAnalyzer.generateSuggestedQuestions(ctx.question(), answer.toString(), callLog);
+        sink.send("llmCall", callLog.get(callLog.size() - 1));
         if (!suggestedQuestions.isEmpty()) {
             sink.send("suggestedQuestions", suggestedQuestions);
         }
 
-        store.appendMessage(sessionId, "user", ctx.question(), null, null, null, null);
+        store.appendMessage(sessionId, "user", ctx.question(), null, null, null, null, null);
         store.appendMessage(sessionId, "assistant", answer.toString(), null, confidence, "direct",
-                suggestedQuestions.isEmpty() ? null : suggestedQuestions);
+                suggestedQuestions.isEmpty() ? null : suggestedQuestions, callLogAsMaps(callLog));
 
         sink.send("done", "");
+    }
+
+    /** Blocking call that also logs and emits its {@code llmCall} record. */
+    private LlmService.Call callLogged(String step, List<Message> messages,
+                                       List<LlmService.LlmCallRecord> callLog, EventSink sink)
+            throws Exception {
+        try {
+            LlmService.Call result = llmService.callLogged(step, messages);
+            callLog.add(result.record());
+            sink.send("llmCall", result.record());
+            return result;
+        } catch (LlmService.LoggedCallException e) {
+            callLog.add(e.record());
+            sink.send("llmCall", e.record());
+            throw e;
+        }
+    }
+
+    /** {@code LlmCallRecord} list as plain maps, for persistence (Gson, not Jackson). */
+    private static List<Map<String, Object>> callLogAsMaps(List<LlmService.LlmCallRecord> callLog) {
+        if (callLog.isEmpty()) {
+            return null;
+        }
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (LlmService.LlmCallRecord record : callLog) {
+            Map<String, Object> map = new HashMap<>();
+            map.put("step", record.step());
+            map.put("model", record.model());
+            map.put("promptTokens", record.promptTokens());
+            map.put("completionTokens", record.completionTokens());
+            map.put("totalTokens", record.totalTokens());
+            map.put("durationMs", record.durationMs());
+            map.put("contentPreview", record.contentPreview());
+            out.add(map);
+        }
+        return out;
     }
 
     private static long elapsedMs(long startNanos) {
@@ -634,6 +694,7 @@ public class ChatService {
                     .content(row.content())
                     .sources(row.sources())
                     .suggestedQuestions(row.suggestedQuestions())
+                    .llmCalls(row.llmCalls())
                     .timestamp(row.createdAt())
                     .build());
         }

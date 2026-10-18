@@ -262,6 +262,15 @@ export default function ChatPage() {
         onSources: (sources) => patchAssistant({ sources }),
         onSuggestedQuestions: (suggestedQuestions) =>
           patchAssistant({ suggestedQuestions }),
+        onLlmCall: (call) => {
+          setMessages((prev) =>
+            prev.map((message) =>
+              message.id === assistantId
+                ? { ...message, llmCalls: [...(message.llmCalls ?? []), call] }
+                : message
+            )
+          );
+        },
         onDone: (sources) => {
           if (sources) patchAssistant({ sources });
           setIsStreaming(false);

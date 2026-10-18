@@ -54,11 +54,21 @@ class QueryAnalyzerServiceTest {
             }
             return response;
         }
+
+        @Override
+        public Call callLogged(String step, String prompt) {
+            prompts.add(prompt);
+            if (error != null) {
+                throw new LoggedCallException(error,
+                        new LlmCallRecord(step, null, null, null, null, 0, "调用失败: " + error.getMessage()));
+            }
+            return new Call(response, new LlmCallRecord(step, "fake", null, null, null, 0, null));
+        }
     }
 
     private static QueryAnalyzerService.Analysis analyze(String response) {
         return new QueryAnalyzerService(new FakeLlm(response))
-                .analyze("问题", "document", "知识库", null, null);
+                .analyze("问题", "document", "知识库", null, null, new ArrayList<>());
     }
 
     /** A complete, well-formed model answer. */
@@ -112,7 +122,7 @@ class QueryAnalyzerServiceTest {
             // The whole point of merging routing and rewriting: one round-trip before
             // retrieval can start, not two.
             FakeLlm llm = new FakeLlm(FULL);
-            new QueryAnalyzerService(llm).analyze("问题", "document", "知识库", null, null);
+            new QueryAnalyzerService(llm).analyze("问题", "document", "知识库", null, null, new ArrayList<>());
             assertThat(llm.prompts).hasSize(1);
         }
     }
@@ -465,7 +475,7 @@ class QueryAnalyzerServiceTest {
 
         private QueryAnalyzerService.Analysis failing(RuntimeException error) {
             return new QueryAnalyzerService(new FakeLlm(null, error))
-                    .analyze("问题", "document", "知识库", null, null);
+                    .analyze("问题", "document", "知识库", null, null, new ArrayList<>());
         }
 
         @Test
@@ -529,7 +539,7 @@ class QueryAnalyzerServiceTest {
         private String promptFor(String kbType, String kbName,
                                  List<MetadataStore.MessageRow> history) {
             FakeLlm llm = new FakeLlm(FULL);
-            new QueryAnalyzerService(llm).analyze("这个怎么用", kbType, kbName, history, null);
+            new QueryAnalyzerService(llm).analyze("这个怎么用", kbType, kbName, history, null, new ArrayList<>());
             return llm.prompts.get(0);
         }
 
@@ -564,7 +574,7 @@ class QueryAnalyzerServiceTest {
         private String promptForGlobalKbs(List<MetadataStore.KbRow> globalKbs) {
             FakeLlm llm = new FakeLlm(FULL);
             new QueryAnalyzerService(llm)
-                    .analyze("天龙八部的释义是什么", "document", "西游记", null, globalKbs);
+                    .analyze("天龙八部的释义是什么", "document", "西游记", null, globalKbs, new ArrayList<>());
             return llm.prompts.get(0);
         }
 
@@ -668,7 +678,7 @@ class QueryAnalyzerServiceTest {
         }
 
         private MetadataStore.MessageRow message(String role, String content) {
-            return new MetadataStore.MessageRow(0, role, content, null, null, null, null,
+            return new MetadataStore.MessageRow(0, role, content, null, null, null, null, null,
                     "2026-01-02T03:04:05Z");
         }
     }

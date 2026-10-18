@@ -84,6 +84,7 @@ CREATE TABLE IF NOT EXISTS messages (
     confidence           REAL,
     route                TEXT,
     suggested_questions  TEXT,
+    llm_calls            TEXT,
     created_at           TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
@@ -138,6 +139,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
     message_columns = {row["name"] for row in conn.execute("PRAGMA table_info(messages)")}
     if "suggested_questions" not in message_columns:
         conn.execute("ALTER TABLE messages ADD COLUMN suggested_questions TEXT")
+    if "llm_calls" not in message_columns:
+        conn.execute("ALTER TABLE messages ADD COLUMN llm_calls TEXT")
 
 
 def get_conn() -> sqlite3.Connection:
