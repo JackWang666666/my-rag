@@ -12,6 +12,6 @@ public class RagApplication {
 
     public static void main(String[] args) {
         SpringApplication.run(RagApplication.class, args);
-        System.out.println("服务启动完毕");
+        System.out.println("服务启动完毕，再次测试是否成功");
     }
 }
