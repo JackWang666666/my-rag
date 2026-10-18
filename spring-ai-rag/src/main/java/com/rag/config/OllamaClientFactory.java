@@ -18,12 +18,18 @@ import org.springframework.stereotype.Component;
 public class OllamaClientFactory {
 
     public OllamaChatModel buildChatModel(String baseUrl, String model) {
-        OllamaApi api = new OllamaApi(baseUrl);
-        return new OllamaChatModel(api, new OllamaOptions().withModel(model));
+        OllamaApi api = OllamaApi.builder().baseUrl(baseUrl).build();
+        return OllamaChatModel.builder()
+                .ollamaApi(api)
+                .defaultOptions(OllamaOptions.builder().model(model).build())
+                .build();
     }
 
     public OllamaEmbeddingModel buildEmbeddingModel(String baseUrl, String model) {
-        OllamaApi api = new OllamaApi(baseUrl);
-        return new OllamaEmbeddingModel(api, new OllamaOptions().withModel(model));
+        OllamaApi api = OllamaApi.builder().baseUrl(baseUrl).build();
+        return OllamaEmbeddingModel.builder()
+                .ollamaApi(api)
+                .defaultOptions(OllamaOptions.builder().model(model).build())
+                .build();
     }
 }

@@ -5,7 +5,6 @@ import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.embedding.EmbeddingRequest;
 import org.springframework.ai.embedding.EmbeddingResponse;
 
-import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -35,7 +34,7 @@ public class DynamicEmbeddingModel implements EmbeddingModel {
     }
 
     @Override
-    public List<Double> embed(Document document) {
+    public float[] embed(Document document) {
         return delegate.get().embed(document);
     }
 }

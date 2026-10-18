@@ -57,6 +57,9 @@ public class RagProperties {
 
     private int graphMaxChunks = 40;
 
+    /** Shared MCP server list; must match the Python backend's MCP_SERVERS_CONFIG. */
+    private String mcpServersConfig = "../config/mcp-servers.json";
+
     /** True when {@link #jwtSecret} was generated because none was configured. */
     private boolean jwtSecretGenerated;
 

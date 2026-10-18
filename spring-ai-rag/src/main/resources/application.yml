@@ -105,6 +105,11 @@ rag:
   # 调太多次很慢也很贵
   graph-max-chunks: ${GRAPH_MAX_CHUNKS:40}
 
+  # Shared MCP server list. Must point at the same file as the Python backend's
+  # MCP_SERVERS_CONFIG. See docs/CONTRACT.md section 10.
+  # MCP server 配置文件路径,两端共享同一份文件(见 docs/CONTRACT.md 第 10 节)
+  mcp-servers-config: ${MCP_SERVERS_CONFIG:../config/mcp-servers.json}
+
 logging:
   level:
     com.rag: INFO

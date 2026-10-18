@@ -27,6 +27,9 @@ def get_chat_model(provider: Optional[str] = None, streaming: bool = False):
             model=settings.OPENAI_MODEL,
             streaming=streaming,
             temperature=0.7,
+            # Without this, astream() never gets a usage_metadata chunk -- the
+            # request just never asks the server for one. No effect on ainvoke().
+            stream_usage=True,
         )
     elif active_provider == "ollama":
         # Use ChatOpenAI with Ollama's OpenAI-compatible endpoint
@@ -36,6 +39,9 @@ def get_chat_model(provider: Optional[str] = None, streaming: bool = False):
             model=settings.OLLAMA_MODEL,
             streaming=streaming,
             temperature=0.7,
+            # Without this, astream() never gets a usage_metadata chunk -- the
+            # request just never asks the server for one. No effect on ainvoke().
+            stream_usage=True,
         )
     elif active_provider == "volcengine":
         return ChatOpenAI(
@@ -44,6 +50,9 @@ def get_chat_model(provider: Optional[str] = None, streaming: bool = False):
             model=settings.VOLCENGINE_MODEL,
             streaming=streaming,
             temperature=0.7,
+            # Without this, astream() never gets a usage_metadata chunk -- the
+            # request just never asks the server for one. No effect on ainvoke().
+            stream_usage=True,
         )
     else:
         raise ValueError(f"Unsupported LLM provider: {active_provider}")

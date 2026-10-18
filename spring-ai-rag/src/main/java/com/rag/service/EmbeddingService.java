@@ -72,7 +72,7 @@ public class EmbeddingService {
 
     public float[] embed(String text) {
         EmbeddingResponse response = model().embedForResponse(List.of(text));
-        return toFloatArray(response.getResults().get(0).getOutput());
+        return response.getResults().get(0).getOutput();
     }
 
     /**
@@ -97,22 +97,11 @@ public class EmbeddingService {
             int end = Math.min(start + batchSize, texts.size());
             EmbeddingResponse response = model.embedForResponse(
                     new ArrayList<>(texts.subList(start, end)));
-            response.getResults().forEach(result -> results.add(toFloatArray(result.getOutput())));
+            response.getResults().forEach(result -> results.add(result.getOutput()));
             log.debug("Embedded {}/{} chunks", end, texts.size());
         }
 
         return results;
     }
 
-    private static float[] toFloatArray(List<Double> values) {
-        if (values == null) {
-            return new float[0];
-        }
-        float[] out = new float[values.size()];
-        for (int i = 0; i < out.length; i++) {
-            Double value = values.get(i);
-            out[i] = value == null ? 0f : value.floatValue();
-        }
-        return out;
-    }
 }

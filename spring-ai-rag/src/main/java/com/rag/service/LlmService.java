@@ -7,7 +7,10 @@ import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.model.tool.ToolCallingChatOptions;
+import org.springframework.ai.tool.ToolCallback;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
@@ -24,6 +27,15 @@ import java.util.List;
  * <p>The provider lookup goes through {@link ChatModelRegistry} because injecting
  * a {@code Map<String, ChatModel>} gets bean names, not provider names — see that
  * class for why the runtime switch used to be a silent no-op.
+ *
+ * <p>{@link #mcpTools} is attached to every blocking {@link #call}/{@link
+ * #callLogged} prompt via {@code ToolCallingChatOptions}. {@code ChatModel.call}
+ * runs the tool-call loop internally (default {@code internalToolExecutionEnabled
+ * = true}), so no explicit loop is needed here — see docs/CONTRACT.md section 10.
+ * An empty array (no MCP servers configured) is a no-op, identical to the
+ * pre-MCP behavior. {@link #stream} does not get tools yet: only the {@code
+ * direct} route uses it, and streamed internal tool-call execution has not been
+ * verified.
  */
 @Service
 @Slf4j
@@ -31,14 +43,20 @@ public class LlmService {
 
     private final ChatModelRegistry registry;
     private final SettingsStore settings;
+    private final ToolCallback[] mcpTools;
 
-    public LlmService(ChatModelRegistry registry, SettingsStore settings) {
+    public LlmService(ChatModelRegistry registry, SettingsStore settings, ToolCallback[] mcpToolCallbacks) {
         this.registry = registry;
         this.settings = settings;
+        this.mcpTools = mcpToolCallbacks;
     }
 
     public ChatModel getChatModel() {
         return registry.resolve(settings.current().getLlmProvider());
+    }
+
+    private ChatOptions toolOptions() {
+        return ToolCallingChatOptions.builder().toolCallbacks(mcpTools).build();
     }
 
     /** Stream a single-prompt completion as text deltas. */
@@ -60,7 +78,7 @@ public class LlmService {
     /** Blocking completion. Used by the analyzer, reranker and graph extractor. */
     public String call(String prompt) {
         try {
-            ChatResponse response = getChatModel().call(new Prompt(prompt));
+            ChatResponse response = getChatModel().call(new Prompt(prompt, toolOptions()));
             return contentOf(response);
         } catch (Exception e) {
             log.error("LLM call failed", e);
@@ -75,7 +93,7 @@ public class LlmService {
      */
     public String call(List<Message> messages) {
         try {
-            ChatResponse response = getChatModel().call(new Prompt(messages));
+            ChatResponse response = getChatModel().call(new Prompt(messages, toolOptions()));
             return contentOf(response);
         } catch (Exception e) {
             log.error("LLM call failed", e);
@@ -86,10 +104,10 @@ public class LlmService {
     private static String contentOf(ChatResponse response) {
         if (response == null || response.getResult() == null
                 || response.getResult().getOutput() == null
-                || response.getResult().getOutput().getContent() == null) {
+                || response.getResult().getOutput().getText() == null) {
             return "";
         }
-        return response.getResult().getOutput().getContent();
+        return response.getResult().getOutput().getText();
     }
 
     /**
@@ -112,11 +130,11 @@ public class LlmService {
      * main answer generation on rag/graph/hybrid routes).
      */
     public Call callLogged(String step, String prompt) {
-        return callLogged(step, new Prompt(prompt));
+        return callLogged(step, new Prompt(prompt, toolOptions()));
     }
 
     public Call callLogged(String step, List<Message> messages) {
-        return callLogged(step, new Prompt(messages));
+        return callLogged(step, new Prompt(messages, toolOptions()));
     }
 
     private Call callLogged(String step, Prompt prompt) {
@@ -165,16 +183,19 @@ public class LlmService {
 
     private static Long usagePromptTokens(ChatResponse response) {
         Usage usage = usageOf(response);
-        return usage == null ? null : usage.getPromptTokens();
+        return usage == null || usage.getPromptTokens() == null
+                ? null : usage.getPromptTokens().longValue();
     }
 
     private static Long usageCompletionTokens(ChatResponse response) {
         Usage usage = usageOf(response);
-        return usage == null ? null : usage.getGenerationTokens();
+        return usage == null || usage.getCompletionTokens() == null
+                ? null : usage.getCompletionTokens().longValue();
     }
 
     private static Long usageTotalTokens(ChatResponse response) {
         Usage usage = usageOf(response);
-        return usage == null ? null : usage.getTotalTokens();
+        return usage == null || usage.getTotalTokens() == null
+                ? null : usage.getTotalTokens().longValue();
     }
 }

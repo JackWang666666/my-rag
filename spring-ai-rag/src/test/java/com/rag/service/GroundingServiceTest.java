@@ -26,7 +26,7 @@ class GroundingServiceTest {
         }
 
         FakeLlm(String response, RuntimeException error) {
-            super(null, null);
+            super(null, null, null);
             this.response = response;
             this.error = error;
         }

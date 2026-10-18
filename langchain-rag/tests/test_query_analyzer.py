@@ -70,7 +70,8 @@ def run(coroutine):
 
 
 def analyze(question="问题", **kwargs):
-    return run(qa.analyze_query(question, **kwargs))
+    analysis, _call_record = run(qa.analyze_query(question, **kwargs))
+    return analysis
 
 
 FULL_JSON = """{

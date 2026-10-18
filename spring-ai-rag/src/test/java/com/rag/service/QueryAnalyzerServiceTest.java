@@ -41,7 +41,7 @@ class QueryAnalyzerServiceTest {
         FakeLlm(String response, RuntimeException error) {
             // The constructor only assigns its fields, so nulls are safe here as long
             // as call() never reaches the real implementation.
-            super(null, null);
+            super(null, null, null);
             this.response = response;
             this.error = error;
         }

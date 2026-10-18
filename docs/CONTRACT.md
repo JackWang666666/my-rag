@@ -317,3 +317,42 @@ confidence        = 0.3*countFactor + 0.5*scoreFactor + 0.2*routeConfidence
 | `none` | 跳过，按向量分排序 | 跳过，按向量分排序 |
 
 阈值 `RERANK_THRESHOLD`（默认 3.0，0-10 区间），保留 `RERANK_TOP_K`（默认 5）条。
+
+## 10. MCP Server 配置（`config/mcp-servers.json`）
+
+两端共享的 MCP (Model Context Protocol) client 配置文件，与 `data/rag.db` 一样放在
+仓库根目录，两端各自读取、各自转换成自己库的原生配置形状（不是 Claude Desktop
+格式，也不是 `langchain-mcp-adapters` 的原生格式）。配置项：Python
+`MCP_SERVERS_CONFIG`（默认 `../config/mcp-servers.json`）、Java
+`rag.mcp-servers-config`（默认 `../config/mcp-servers.json`）。
+
+```json
+{
+  "servers": [
+    {
+      "name": "example",
+      "enabled": false,
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@example/mcp-server"],
+      "env": {}
+    }
+  ]
+}
+```
+
+- `transport`：`"stdio"` | `"sse"`
+- `stdio` 用 `command`/`args`/`env`；`sse` 用 `url`
+- `enabled: false` 的条目被跳过，不会尝试连接
+- 未识别的 `transport` 值只记日志跳过，不影响其他 server 和启动
+- 任一 server 连接失败只记日志，不影响启动——工具调用是增强能力，不是硬依赖，
+  模型回答时就是少了那部分工具可用，RAG 主流程不受影响
+- 工具调用对两端现有的 SSE 事件契约（第 4 节）没有新增事件：模型内部的工具调用
+  循环发生在"生成"阶段内部，`stage=generating` 的 `start`/`done` 照常各发一次，
+  中间不暴露工具调用细节给前端
+
+**Java 端现状**：已实现（`com.rag.config.McpToolsConfig`），工具通过
+`ToolCallingChatOptions` 接入 `LlmService` 的非流式调用路径
+（`call`/`callLogged`）。流式路径（`stream`，仅 `direct` 路由使用）暂未接入工具。
+
+**Python 端现状**：尚未实现。

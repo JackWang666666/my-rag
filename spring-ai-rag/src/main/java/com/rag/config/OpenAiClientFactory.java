@@ -33,15 +33,26 @@ public class OpenAiClientFactory {
     }
 
     public OpenAiChatModel buildChatModel(String baseUrl, String apiKey, String model) {
-        OpenAiApi api = new OpenAiApi(baseUrl, apiKey, restClientBuilder.clone(),
-                webClientBuilder.clone());
-        return new OpenAiChatModel(api, OpenAiChatOptions.builder().withModel(model).build());
+        OpenAiApi api = OpenAiApi.builder()
+                .baseUrl(baseUrl)
+                .apiKey(apiKey)
+                .restClientBuilder(restClientBuilder.clone())
+                .webClientBuilder(webClientBuilder.clone())
+                .build();
+        return OpenAiChatModel.builder()
+                .openAiApi(api)
+                .defaultOptions(OpenAiChatOptions.builder().model(model).build())
+                .build();
     }
 
     public OpenAiEmbeddingModel buildEmbeddingModel(String baseUrl, String apiKey, String model) {
-        OpenAiApi api = new OpenAiApi(baseUrl, apiKey, restClientBuilder.clone(),
-                webClientBuilder.clone());
+        OpenAiApi api = OpenAiApi.builder()
+                .baseUrl(baseUrl)
+                .apiKey(apiKey)
+                .restClientBuilder(restClientBuilder.clone())
+                .webClientBuilder(webClientBuilder.clone())
+                .build();
         return new OpenAiEmbeddingModel(api, MetadataMode.EMBED,
-                OpenAiEmbeddingOptions.builder().withModel(model).build());
+                OpenAiEmbeddingOptions.builder().model(model).build());
     }
 }
