@@ -1,0 +1,28 @@
+fastapi==0.111.0
+uvicorn[standard]==0.30.1
+python-multipart==0.0.9
+pydantic-settings==2.3.4
+langchain==0.2.6
+langchain-openai==0.1.14
+langchain-community==0.2.6
+langchain-milvus==0.1.2
+pymilvus==2.4.4
+neo4j==5.22.0
+pypdf==4.2.0
+python-docx==1.1.0
+pandas==2.2.2
+openpyxl==3.1.5
+tiktoken==0.7.0
+sentence-transformers==3.0.1
+python-dotenv==1.0.1
+sse-starlette==2.1.0
+aiofiles==24.1.0
+# bcrypt directly rather than passlib: passlib 1.7.4 is the last release (2020)
+# and its bcrypt backend probe breaks against bcrypt >= 4.1, so it would have
+# needed a `bcrypt<4.1` pin to work at all. See app/core/auth.py.
+bcrypt==4.2.1
+python-jose[cryptography]==3.3.0
+
+# Tests
+pytest==8.2.2
+httpx==0.27.0

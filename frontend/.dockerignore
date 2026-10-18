@@ -1,0 +1,17 @@
+# Without this, `COPY . .` in the builder stage overwrites the node_modules the
+# deps stage just installed with whatever the host happens to have — including
+# platform-specific binaries built for macOS, which then fail inside Alpine.
+node_modules
+.next
+out
+
+# Local secrets and machine-local state. .env.example is deliberately not ignored.
+.env
+.env.local
+.env.*.local
+
+tsconfig.tsbuildinfo
+npm-debug.log*
+.DS_Store
+Dockerfile
+.dockerignore

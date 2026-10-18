@@ -1,0 +1,54 @@
+# Nothing in the tree ignored anything before this file existed, which is how
+# spring-ai-rag/target/ and frontend/tsconfig.tsbuildinfo ended up checked in.
+
+# --- Secrets -------------------------------------------------------------
+# Every .env.example is tracked; no .env ever is.
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Spring Boot 会自动加载 ./config/ —— 本机凭据放这里,同样绝不入库。
+spring-ai-rag/config/
+
+# --- Runtime state -------------------------------------------------------
+# The shared metadata database and everything users upload.
+data/
+uploads/
+*.db
+*.db-wal
+*.db-shm
+
+# --- Java ----------------------------------------------------------------
+target/
+*.jar
+*.class
+
+# --- Python --------------------------------------------------------------
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+.pytest_cache/
+.mypy_cache/
+*.egg-info/
+
+# --- Node / Next.js ------------------------------------------------------
+node_modules/
+.next/
+out/
+tsconfig.tsbuildinfo
+npm-debug.log*
+yarn-error.log*
+
+# --- Editors and OS ------------------------------------------------------
+.idea/
+.vscode/
+*.iml
+.DS_Store
+.claude/settings.local.json
+
+# --- Model caches --------------------------------------------------------
+# sentence-transformers downloads reranker/embedding weights on first use.
+.cache/
+models/

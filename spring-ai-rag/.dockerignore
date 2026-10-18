@@ -1,0 +1,17 @@
+# The build stage compiles from source; a host target/ would be copied in and
+# then partially overwritten, which is how stale classes end up in an image.
+target
+
+# Runtime state belongs in volumes (see langchain-rag/.dockerignore).
+uploads
+data
+*.db
+*.db-wal
+*.db-shm
+
+.idea
+*.iml
+.env
+.DS_Store
+Dockerfile
+.dockerignore

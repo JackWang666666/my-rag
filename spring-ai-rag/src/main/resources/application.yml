@@ -1,0 +1,111 @@
+# 全文说明:${X:默认值} 是 Spring 的占位符语法 —— 启动时先找环境变量 X,
+# 找不到就用冒号后面的默认值。本项目实际填真实密钥的地方不是这个文件,而是
+# config/application.yml(工作目录下的外部配置,优先级高于本文件,会覆盖这里
+# 的同名字段)。所以这份文件里大多数敏感项(key、密码)默认值留空,正常启动
+# 全靠 config/application.yml 里的字面值生效,这里只是"没配置时的兜底"。
+
+server:
+  port: 8080   # Java 后端监听端口,前端 Settings 页面显示的 8080 就是这个
+
+spring:
+  servlet:
+    multipart:
+      # 上传文件大小限制,取 MAX_UPLOAD_MB 环境变量,没设则 50MB
+      max-file-size: ${MAX_UPLOAD_MB:50}MB
+      max-request-size: ${MAX_UPLOAD_MB:50}MB
+  ai:
+    openai:
+      # OpenAI(或兼容网关)的 key,留空意味着"没配",详见下方说明
+      api-key: ${OPENAI_API_KEY:}
+      # 接口地址,默认官方地址;换成公司网关时改这里(或 config/application.yml 覆盖)
+      base-url: ${OPENAI_API_BASE:https://api.openai.com}
+      chat:
+        options:
+          # 对话用的模型名
+          model: ${OPENAI_MODEL:gpt-4o}
+      embedding:
+        options:
+          # 向量化(embedding)用的模型名,上传文档时用它把文本转成向量
+          model: ${OPENAI_EMBEDDING_MODEL:text-embedding-3-small}
+    ollama:
+      # 本地部署的 Ollama 地址,作为 OpenAI 不可用时的备选项
+      base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+      chat:
+        options:
+          model: ${OLLAMA_MODEL:qwen2:7b}
+  neo4j:
+    # 图数据库连接地址,对应 docker 里起的 neo4j 容器(7687 端口)
+    uri: ${NEO4J_URI:bolt://localhost:7687}
+    authentication:
+      username: ${NEO4J_USER:neo4j}
+      password: ${NEO4J_PASSWORD:neo4j123456}
+
+milvus:
+  # 向量数据库连接地址,对应 docker 里起的 milvus 容器(19530 端口)
+  host: ${MILVUS_HOST:localhost}
+  port: ${MILVUS_PORT:19530}
+  # Only needed for a managed instance (e.g. Zilliz Cloud); the compose stack
+  # runs Milvus without authentication.
+  # 只有连云端 Milvus(如 Zilliz Cloud)才需要填,本地 docker 跑的 Milvus 不需要鉴权
+  token: ${MILVUS_TOKEN:}
+  database: ${MILVUS_DATABASE:default}
+
+rag:
+  # 用哪个厂商的大模型 / embedding 模型,默认都是 openai(或兼容网关)
+  llm-provider: ${LLM_PROVIDER:openai}
+  embedding-provider: ${EMBEDDING_PROVIDER:openai}
+  # 文档切块的大小和重叠长度,影响检索精度
+  chunk-size: ${CHUNK_SIZE:1000}
+  chunk-overlap: ${CHUNK_OVERLAP:200}
+  # 上传文件存放目录
+  upload-dir: ${UPLOAD_DIR:./uploads}
+
+  # Shared metadata store. Must point at the same file as the Python backend's
+  # DB_PATH, otherwise the two backends see different knowledge bases.
+  # 共享的元数据库(SQLite 文件路径)。必须和 Python 后端的 DB_PATH 指向同一个文件,
+  # 否则两个后端看到的知识库数据不一致。
+  db-path: ${DB_PATH:../data/rag.db}
+
+  # Security. JWT_SECRET is REQUIRED in any real deployment and must match the
+  # Python backend so tokens are interchangeable. When empty a random secret is
+  # generated per process and every existing token stops working on restart.
+  # 登录 token 签名密钥,正式环境必须填,且要和 Python 后端一致,token 才能互通。
+  # 留空的后果:每次重启都会随机生成一个新密钥,之前登录发的 token 全部失效,
+  # 用户会被强制退出重新登录。
+  jwt-secret: ${JWT_SECRET:}
+  access-token-expire-hours: ${ACCESS_TOKEN_EXPIRE_HOURS:72}
+  admin-username: ${ADMIN_USERNAME:admin}
+  # When empty a random password is generated and printed in the startup log.
+  # 管理员初始密码,留空则每次启动随机生成一个,打印在启动日志里(只在第一次建号时有效)
+  admin-password: ${ADMIN_PASSWORD:}
+  # Comma-separated browser origins. Do NOT use `*`: credentials cannot be sent
+  # to a wildcard origin.
+  # 允许跨域访问的前端地址(逗号分隔),不能写 *,否则带身份凭证的请求会被浏览器拒绝
+  cors-origins: ${CORS_ORIGINS:http://localhost:3000}
+
+  max-upload-mb: ${MAX_UPLOAD_MB:50}
+  embedding-batch-size: ${EMBEDDING_BATCH_SIZE:64}
+
+  # local is Python-only; this backend warns and falls back to llm.
+  # local 模式是 Python 后端独有的,Java 后端配了会自动降级用 llm 模式重排
+  reranker-provider: ${RERANKER_PROVIDER:llm}
+  reranker-model: ${RERANKER_MODEL:BAAI/bge-reranker-v2-m3}
+  rerank-top-k: ${RERANK_TOP_K:5}
+  rerank-threshold: ${RERANK_THRESHOLD:3.0}
+
+  # Below this confidence (0-1), the chat pipeline lets the model answer from its
+  # own general knowledge instead of refusing because the knowledge base context
+  # doesn't contain the answer.
+  # 低于这个置信度(0-1)时,聊天流程会让模型用自己的通用知识回答,而不是因为知识库
+  # 资料里没有答案就拒绝回答
+  low-confidence-threshold: ${LOW_CONFIDENCE_THRESHOLD:0.85}
+
+  # Max chunks per ingest run sent through entity extraction (one LLM call each).
+  # 每次上传文档,最多对多少个分块做实体抽取(建知识图谱),每个分块要调一次大模型,
+  # 调太多次很慢也很贵
+  graph-max-chunks: ${GRAPH_MAX_CHUNKS:40}
+
+logging:
+  level:
+    com.rag: INFO
+    org.springframework.ai: INFO

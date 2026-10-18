@@ -1,0 +1,21 @@
+# Virtualenvs are built for the host platform and would shadow /opt/venv.
+venv
+.venv
+__pycache__
+**/__pycache__
+*.pyc
+
+# Runtime state: uploads and the metadata database belong in volumes, not in the
+# image. Copying a local rag.db in would ship somebody's accounts.
+uploads
+data
+*.db
+*.db-wal
+*.db-shm
+
+.env
+.env.local
+.pytest_cache
+.DS_Store
+Dockerfile
+.dockerignore

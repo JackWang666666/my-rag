@@ -1,0 +1,23 @@
+[project]
+name = "langchain-rag"
+version = "0.1.0"
+description = "LangChain-based RAG backend with Milvus and Neo4j"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# The suite imports `app.*`, so the backend root has to be on sys.path. Without
+# this, `pytest` only works when invoked as `python -m pytest`.
+pythonpath = ["."]
+# Warnings from the dependency tree are not this project's to fix, but our own
+# deprecations should be visible.
+filterwarnings = ["default"]

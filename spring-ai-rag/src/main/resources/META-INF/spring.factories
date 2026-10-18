@@ -1,0 +1,4 @@
+# EnvironmentPostProcessor still registers through spring.factories in Boot 3;
+# only auto-configuration classes moved to AutoConfiguration.imports.
+org.springframework.boot.env.EnvironmentPostProcessor=\
+com.rag.config.OpenAiEnvironmentPostProcessor
